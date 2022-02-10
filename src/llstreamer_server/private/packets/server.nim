@@ -1,9 +1,18 @@
 import std/[tables]
 import enums
 import ".."/[utils, idgen]
+import ".."/db/[objects]
 
 ## Server packets
 type
+    SSAccountInfo* = object
+        ## Information about an account, not including sensitive data (not a full packet body)
+        
+        id*: AccountId ## The sequential account ID
+        username*: string ## The account's username
+        metadata*: Metadata ## The account's public metadata
+        creationDate*: EpochSecond ## The epoch second of when the account was created
+
     SStreamInfo* = object
         ## Information about a stream, not including sensitive data (not a full packet body)
         

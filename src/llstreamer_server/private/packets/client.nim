@@ -15,9 +15,10 @@ type
         
         username*: string ## The username to use
         password*: string ## The password to use
+        ephemeral*: bool ## Whether this account should be marked as ephemeral (will fail if this value does not match an existing account's ephemeral value)
         queryInfoRequiresCommonStream*: bool ## Whether users must be watching or subscribed to the chat of a common stream to query the client's info
         privMsgRequiresCommonStream*: bool ## Whether users must be watching or subscribed to the chat of a common stream to send a private message to the client
-        publicMetadata*: Table[string, string] ## Public metadata available to other clients (assigns metadata for all connections for this account, not just this one)
+        publicMetadata*: Table[string, string] ## Public metadata available to other clients (assigns metadata for all connections for this account, not just this one, and may be written to a database)
         privateMetadata*: Table[string, string] ## Private metadata only available to the server
     
     CCreateStream* = object

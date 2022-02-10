@@ -1,10 +1,5 @@
-import std/[asyncdispatch, db_sqlite]
-
+import std/[asyncdispatch]
 import llstreamer_server/private/[server, objects, constants, crypto]
-import llstreamer_server/private/db/[migrations]
-
-let db = open("lol.db", "", "", "")
-db.applyMigrations()
 
 when isMainModule:
     echo "LLStreamer Server "&SERVER_VER

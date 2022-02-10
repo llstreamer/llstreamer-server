@@ -1,7 +1,7 @@
 import std/[db_sqlite, locks, asyncdispatch, tables, os, strformat, options, times, strutils, sequtils, algorithm, sugar]
 import msgpack4nim
 import ".."/[logging, exceptions, utils, idgen]
-import objects
+import objects, migrations
 
 type
     QueryKind {.pure.} = enum
@@ -88,6 +88,7 @@ proc initSqlite*(filePath: string, useThread: bool) =
     ## Initializes the SQLite database connection and worker thread
 
     sqlite.conn = open(filePath, "", "", "")
+    sqlite.conn.applyMigrations()
     sqlite.useThread = useThread
     if useThread:
         queryQueue.queries = newSeq[Query]()
