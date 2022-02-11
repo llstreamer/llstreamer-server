@@ -66,9 +66,9 @@ proc applyMigrations*[T: SupportedDbConn](conn: T) =
         )
         """
     elif conn is db_postgres.DbConn:
-        raise newException(DatabaseMigrationError, "PostgreSQL support has not yet been implemented")
+        raise newDatabaseMigrationError("PostgreSQL support has not yet been implemented")
     elif conn is db_mysql.DbConn:
-        raise newException(DatabaseMigrationError, "MySQL support has not yet been implemented")
+        raise newDatabaseMigrationError("MySQL support has not yet been implemented")
     conn.exec(createTableSql)
 
     # Fetch which migrations have already been applied

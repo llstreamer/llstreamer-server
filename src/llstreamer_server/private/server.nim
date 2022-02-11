@@ -1,6 +1,7 @@
 import std/[options, asyncnet, asyncdispatch, times, strformat]
-
-import logging, objects, client, utils, constants
+import packets/[readwrite, enums]
+import packets/objects as packet_objects
+import logging, objects, client, utils, constants, exceptions
 
 type
     Server* = object
@@ -106,37 +107,16 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
     let sock = client.socket
     while client.isConnected:
         try:
-            # Read packet header
-            let header = (await sock.recv(PACKET_HEADER_SIZE)).asBytes
-
-            # If empty or less than the defined packet header size, the client has disconnected
-            if header.len < PACKET_HEADER_SIZE:
-                client.isConnected = false
-                break
-
-            # Parse packet header
-            let packetTypeByte = (uint8) header[0]
-            let id = bytesToInt[uint32](header.slice(1, 4))
-            let reply = bytesToInt[uint32](header.slice(5, 8))
-            let len = bytesToInt[uint16](header.slice(9, 10))
-
-            # Check if known type
-            # if packetTypeByte > ClientPacketType.high.ord:
-            #     logError fmt"Invalid client packet type ID {packetTypeByte}, discarding"
-
-            #     # Read and discard the rest of the packet
-            #     discard await sock.recv((int) len)
-            # else:
-            #     let packetType = ClientPacketType(packetTypeByte)
-            #     echo packetType
-
-            #     let body = (await sock.recv((int) len)).asBytes
-            #     echo body
-
-            #     echo "Now parsing packet..."
-            #     let packet = parsePacket(packetType, id, reply, body)
-
-            #     echo packet
+            # Read packet
+            try:
+                let packet = await sock.readPacket()
+                echo packet
+            except ShortPacketHeaderError as e:
+                logError e.msg
+            except UnknownPacketTypeError as e:
+                logError e.msg
+            except MalformedPacketError as e:
+                logError e.msg
 
         except:
             logError "Exception occurred during client read loop", getCurrentException(), getCurrentExceptionMsg()

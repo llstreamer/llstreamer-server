@@ -41,7 +41,7 @@ proc parseArgon2HashStr*(str: string): Argon2Hash {.raises: [CannotParseHashErro
 
     # Make sure there is a correct number of parts
     if parts.len < 6:
-        raise newException(CannotParseHashError, "Malformed Argon2 hash string")
+        raise newCannotParseHashError("Malformed Argon2 hash string")
 
     let algoStr = parts[1]
     let verStrRaw = parts[2]
@@ -51,7 +51,7 @@ proc parseArgon2HashStr*(str: string): Argon2Hash {.raises: [CannotParseHashErro
 
     # Check algorithm
     proc err() = 
-        raise newException(CannotParseHashError, fmt"Unknown algorithm type '{algoStr}'")
+        raise newCannotParseHashError(fmt"Unknown algorithm type '{algoStr}'")
     if algoStr.len < 7:
         err()
     let algoType = algoStr.substr(6)

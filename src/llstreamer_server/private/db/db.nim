@@ -6,7 +6,7 @@ var conf: DatabaseConfig
 var isSqlite = false
 var isPostgres = false
 var isMySql = false
-proc initDb*(config: DatabaseConfig) =
+proc initDb*(config: DatabaseConfig) {.raises: DatabaseError.} =
     conf = config
     
     case conf.kind:
@@ -19,14 +19,14 @@ proc initDb*(config: DatabaseConfig) =
         initSqlite(conf.sqliteDbPath, true)
     of DatabaseConfigKind.Postgres:
         isPostgres = true
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     of DatabaseConfigKind.MySql:
         isMySql = true
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
 # Abstracted database procs
 
-proc insertAccount*(username: string, passwordHash: string, metadata: Option[Metadata], isEphemeral: bool): Future[AccountRow] =
+proc insertAccount*(username: string, passwordHash: string, metadata: Option[Metadata], isEphemeral: bool): Future[AccountRow] {.raises: DatabaseError.} =
     ## Inserts a new account with the specified details and returns it.
     ## In most cases you should use "createAccount" in the "accounts" module, because it hashes the password and does other important things.
     ## This method simply creates an entry in the database.
@@ -34,71 +34,71 @@ proc insertAccount*(username: string, passwordHash: string, metadata: Option[Met
     if isSqlite:
         return sqlite.insertAccount(username, passwordHash, metadata, isEphemeral)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchAccountById*(id: AccountId): Future[Option[AccountRow]] =
+proc fetchAccountById*(id: AccountId): Future[Option[AccountRow]] {.raises: DatabaseError.} =
     ## Fetches an account by its ID, returning none if none with the specified ID exist.
     
     if isSqlite:
         return sqlite.fetchAccountById(id)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchAccountByUsername*(username: string): Future[Option[AccountRow]] =
+proc fetchAccountByUsername*(username: string): Future[Option[AccountRow]] {.raises: DatabaseError.} =
     ## Fetches an account by its username, returning none if none with the specified username exists.
     
     if isSqlite:
         return sqlite.fetchAccountByUsername(username)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateAccountMetadataById*(id: AccountId, metadata: Option[Metadata]): Future[void] =
+proc updateAccountMetadataById*(id: AccountId, metadata: Option[Metadata]): Future[void] {.raises: DatabaseError.} =
     ## Updates the metadata of the account with the specified ID if it exists.
     
     if isSqlite:
         return sqlite.updateAccountMetadataById(id, metadata)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateAccountMetadataByUsername*(username: string, metadata: Option[Metadata]): Future[void] =
+proc updateAccountMetadataByUsername*(username: string, metadata: Option[Metadata]): Future[void] {.raises: DatabaseError.} =
     ## Updates the metadata of the account with the specified username if it exists.
     
     if isSqlite:
         return sqlite.updateAccountMetadataByUsername(username, metadata)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteAccountById*(id: AccountId): Future[void] =
+proc deleteAccountById*(id: AccountId): Future[void] {.raises: DatabaseError.} =
     ## Deletes the account with the specified ID if it exists.
     
     if isSqlite:
         return sqlite.deleteAccountById(id)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteAccountByUsername*(username: string): Future[void] =
+proc deleteAccountByUsername*(username: string): Future[void] {.raises: DatabaseError.} =
     ## Deletes the account with the specified username if it exists.
     
     if isSqlite:
         return sqlite.deleteAccountByUsername(username)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc insertStream*(ownerId: AccountId, name: string, isPublished: bool, key: string, custodianKey: string, metadata: Option[Metadata]): Future[StreamRow] =
+proc insertStream*(ownerId: AccountId, name: string, isPublished: bool, key: string, custodianKey: string, metadata: Option[Metadata]): Future[StreamRow] {.raises: DatabaseError.} =
     ## Inserts a new stream with the specified details and returns it.
     ## In most cases you should use "createStream" in the "streams" module, because it handles key generation and does other important things.
     ## This method simply creates an entry in the database.
@@ -106,86 +106,86 @@ proc insertStream*(ownerId: AccountId, name: string, isPublished: bool, key: str
     if isSqlite:
         return sqlite.insertStream(ownerId, name, isPublished, key, custodianKey, metadata)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchStreamById*(id: StreamId): Future[Option[StreamRow]] =
+proc fetchStreamById*(id: StreamId): Future[Option[StreamRow]] {.raises: DatabaseError.} =
     ## Fetches a stream by its ID, returning none if none with the specified ID exist.
     
     if isSqlite:
         return sqlite.fetchStreamById(id)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchStreamsByOwner*(ownerId: AccountId): Future[seq[StreamRow]] =
+proc fetchStreamsByOwner*(ownerId: AccountId): Future[seq[StreamRow]] {.raises: DatabaseError.} =
     ## Fetches all streams by the specified owner
     
     if isSqlite:
         return sqlite.fetchStreamsByOwner(ownerId)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchPublicStreamsAfter*(id: StreamId, limit: int): Future[seq[StreamRow]] =
+proc fetchPublicStreamsAfter*(id: StreamId, limit: int): Future[seq[StreamRow]] {.raises: DatabaseError.} =
     ## Fetches public streams with an ID higher the specified ID, returning a maximum of the specified amount.
     
     if isSqlite:
         return sqlite.fetchPublicStreamsAfter(id, limit)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchPublicStreamsBefore*(id: StreamId, limit: int): Future[seq[StreamRow]] =
+proc fetchPublicStreamsBefore*(id: StreamId, limit: int): Future[seq[StreamRow]] {.raises: DatabaseError.} =
     ## Fetches public streams with an ID higher the specified ID, returning a maximum of the specified amount (ordered by ID descending and then reversed after fetch, to facilitate pagination).
     
     if isSqlite:
         return sqlite.fetchPublicStreamsBefore(id, limit)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateStreamMetadataById*(id: StreamId, metadata: Option[Metadata]) =
+proc updateStreamMetadataById*(id: StreamId, metadata: Option[Metadata]): Future[void] {.raises: DatabaseError.} =
     ## Updates the metadata of the stream with the specified ID if it exists.
     
     if isSqlite:
         return sqlite.updateStreamMetadataById(id, metadata)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateStreamNameById*(id: StreamId, name: string): Future[void] =
+proc updateStreamNameById*(id: StreamId, name: string): Future[void] {.raises: DatabaseError.} =
     ## Updates the name of the stream with the specified ID if it exists.
     
     if isSqlite:
         return sqlite.updateStreamNameById(id, name)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteStreamById*(id: AccountId): Future[void] =
+proc deleteStreamById*(id: AccountId): Future[void] {.raises: DatabaseError.} =
     ## Deletes the stream with the specified ID if it exists.
     
     if isSqlite:
         return sqlite.deleteStreamById(id)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteStreamsByOwner*(ownerId: AccountId): Future[void] =
+proc deleteStreamsByOwner*(ownerId: AccountId): Future[void] {.raises: DatabaseError.} =
     ## Deletes all streams with the specified owner.
     
     if isSqlite:
         return sqlite.deleteStreamsByOwner(ownerId)
     elif isPostgres:
-        raise newException(DatabaseError, "PostgreSQL support not yet implemented")
+        raise newDatabaseError("PostgreSQL support not yet implemented")
     elif isMySql:
-        raise newException(DatabaseError, "MySQL support not yet implemented")
+        raise newDatabaseError("MySQL support not yet implemented")

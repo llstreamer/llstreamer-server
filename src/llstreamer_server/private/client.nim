@@ -1,7 +1,7 @@
 import std/[options, asyncdispatch, asyncnet, nativesockets]
 import idgen, objects, utils
 import packets/objects as packet_objects
-import packets/[enums, server, writer]
+import packets/[enums, server, readwrite]
 
 proc clientFromSocket*(inst: ref Client, socket: AsyncSocket): ref Client =
     ## Configures a Client ref object with the provided AsyncSocket

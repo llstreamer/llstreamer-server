@@ -56,4 +56,4 @@ type
     CSendStreamData* = object
         ## Sent to convert the connection into a stream data input pipe.
         
-        streamId*: NonBlankStreamId ## The stream to send data to
+        streamId*: StreamId ## The stream to send data to
