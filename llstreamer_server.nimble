@@ -3,7 +3,7 @@
 version       = "1.0.0"
 author        = "Termer"
 description   = "Livestreaming server for low-latency video"
-license       = "MIT"
+license       = "AGPL-3.0-or-later"
 srcDir        = "src"
 namedBin["llstreamer_server"] = "server"
 
