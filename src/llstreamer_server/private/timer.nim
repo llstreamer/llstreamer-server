@@ -71,7 +71,7 @@ proc stopTimer*(timer: ref Timer) =
     withLock timer.execLock:
         timer.running = false
 
-proc setTimer*(timer: ref Timer, callback: proc (), ms: int, forever: bool): uint64 =
+proc setTimer*(timer: ref Timer, callback: proc (), ms: int, forever: bool = false): uint64 =
     ## Sets a callback to be run after the specified number of milliseconds, and returns its ID.
     ## Works the same way as JavaScript's "setTimeout", except it can also be infinite (equivalent to JS "setInterval").
     
