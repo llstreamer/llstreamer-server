@@ -10,15 +10,18 @@ type
     ClientPacketHandle* = tuple[packet: ClientPacket, client: ref Client]
         ## Handle for client packets (used to reply)
 
-proc clientFromSocket*(inst: ref Client, socket: AsyncSocket): ref Client =
+proc createClient*(server: ref Server, socket: AsyncSocket): ref Client =
     ## Configures a Client ref object with the provided AsyncSocket
     
+    var inst = new(Client)
+
     let addrInfo = socket.getLocalAddr()
 
     inst.id = genClientId()
     inst.host = addrInfo[0]
     inst.port = addrInfo[1]
     inst.socket = socket
+    inst.server = server
 
     return inst
 

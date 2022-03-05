@@ -261,7 +261,7 @@ proc serverAcceptLoop(server: ref Server) {.async.} =
         let conn = await server.socket.accept()
 
         # Create client object
-        var client = (ref Client)().clientFromSocket(conn)
+        var client = createClient(server, conn)
 
         # Start packet client handler loop
         asyncCheck server.initClientAndLoop(client)
