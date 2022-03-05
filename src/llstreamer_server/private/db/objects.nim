@@ -1,9 +1,7 @@
-import std/[tables, options]
-import ".."/[idgen, utils]
+import std/[options]
+import ".."/[idgen, utils, objects]
 
 type
-    Metadata* = Table[string, string]
-
     AccountRow* = object
         id*: AccountId
         username*: string
@@ -21,30 +19,3 @@ type
         custodianKey*: string
         metadata*: Option[Metadata]
         creationDate*: EpochSecond
-    
-    DatabaseConfigKind* {.pure.} = enum
-        Memory
-        Sqlite
-        Postgres
-        MySql
-
-    DatabaseConfig* = object
-        case kind*: DatabaseConfigKind
-        of DatabaseConfigKind.Memory:
-            useQueryThread*: bool
-        of DatabaseConfigKind.Sqlite:
-            sqliteDbPath*: string
-        of DatabaseConfigKind.Postgres:
-            pgDb*: string
-            pgAddress*: string
-            pgPort*: Natural
-            pgUser*: string
-            pgPass*: string
-            pgPoolSize*: Natural
-        of DatabaseConfigKind.MySql:
-            mysqlDb*: string
-            mysqlAddress*: string
-            mysqlPort*: Natural
-            mysqlUser*: string
-            mysqlPass*: string
-            mysqlPoolSize*: Natural

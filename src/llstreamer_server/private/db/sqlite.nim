@@ -1,7 +1,8 @@
 import std/[db_sqlite, locks, asyncdispatch, tables, os, strformat, options, times, strutils, sequtils, algorithm, sugar]
 import msgpack4nim
-import ".."/[logging, exceptions, utils, idgen]
-import objects, migrations
+import ".."/[logging, exceptions, utils, idgen, objects, threadutils]
+import objects as db_objects
+import migrations
 
 type
     QueryKind {.pure.} = enum
@@ -19,9 +20,9 @@ type
         of QueryKind.Rows:
             rowsFuture: Future[seq[seq[string]]]
         of QueryKind.Row:
-            rowFuture: Future[seq[string]]
+            rowFuture: Future[Option[seq[string]]]
         of QueryKind.Value:
-            valueFuture: Future[string]
+            valueFuture: Future[Option[string]]
     
     QueryQueue = object
         lock: Lock
@@ -35,64 +36,87 @@ type
 var sqlite: Sqlite
 var queryQueue: QueryQueue
 
-var sqliteThread: Thread[tuple[db: ptr Sqlite, queue: ptr QueryQueue]]
-proc sqliteThreadProc(args: tuple[db: ptr Sqlite, queue: ptr QueryQueue]) {.thread.} =
-    let db = args.db
-    let queue = args.queue
+# Local thread executor
+var threadExecutor = newLocalThreadExecutor()
+
+var sqliteThread: Thread[(ptr Sqlite, ptr QueryQueue, ptr ref LocalThreadExecutor)]
+proc sqliteThreadProc(args: (ptr Sqlite, ptr QueryQueue, ptr ref LocalThreadExecutor)) {.thread.} =
+    let db = args[0]
+    let queue = args[1]
+    let executor = args[2][]
 
     proc fail[T](future: Future[T], queryKind: QueryKind, ex: ref Exception, exMsg: string) =
         logError fmt"Failed to run SQLite query of type {queryKind}", ex, exMsg
         future.fail(ex)
 
     while true:
-        sleep(5)
+        sleep(1)
 
         # Check if there are any new queries in the queue
         while queue[].queries.len > 0:
+            # Get the first item of the queue and remove it
             var query: Query
             withLock queue[].lock:
                 query = queue[].queries[0]
                 queue[].queries.del(0)
 
+            # Handle the query according to its type
             withLock db[].lock:
                 case query.kind:
                 of QueryKind.Exec:
                     try:
                         db[].conn.exec(query.sql)
-                        query.execFuture.complete()
+                        doInThread executor:
+                            query.execFuture.complete()
                     except:
-                        query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        doInThread executor:
+                            query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                 of QueryKind.Rows:
                     try:
                         let res = db[].conn.getAllRows(query.sql)
-                        query.rowsFuture.complete(res)
+                        doInThread executor:
+                            query.rowsFuture.complete(res)
                     except:
-                        query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        doInThread executor:
+                            query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                 of QueryKind.Row:
                     try:
-                        let res = db[].conn.getAllRows(query.sql)[0]
-                        query.rowFuture.complete(res)
+                        let res = db[].conn.getAllRows(query.sql)
+                        if res.len > 0:
+                            doInThread executor:
+                                query.rowFuture.complete(some(res[0]))
+                        else:
+                            doInThread executor:
+                                query.rowFuture.complete(none[seq[string]]())
                     except:
-                        query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        doInThread executor:
+                            query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                 of QueryKind.Value:
                     try:
-                        let res = db[].conn.getValue(query.sql)
-                        query.valueFuture.complete(res)
+                        let res = db[].conn.getAllRows(query.sql)
+                        if res.len > 0 and res[0].len > 0:
+                            doInThread executor:
+                                query.valueFuture.complete(some(res[0][0]))
+                        else:
+                            doInThread executor:
+                                query.valueFuture.complete(none[string]())
                     except:
-                        query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        doInThread executor:
+                            query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                 
                 # Destroy statement
                 finalize(query.sql)
 
 proc initSqlite*(filePath: string, useThread: bool) =
-    ## Initializes the SQLite database connection and worker thread
+    ## Initializes the SQLite database connection, worker thread, and related components
 
     sqlite.conn = open(filePath, "", "", "")
     sqlite.conn.applyMigrations()
     sqlite.useThread = useThread
     if useThread:
+        startLocalThreadExecutor(threadExecutor)
         queryQueue.queries = newSeq[Query]()
-        createThread(sqliteThread, sqliteThreadProc, (addr sqlite, addr queryQueue))
+        createThread(sqliteThread, sqliteThreadProc, (addr sqlite, addr queryQueue, addr threadExecutor))
 
 proc timestampToEpochSecond(timestamp: string): EpochSecond =
     return (uint64) parseTime(timestamp, "yyyy-MM-dd HH:mm:ss", utc()).toUnix()
@@ -129,11 +153,11 @@ proc getAllRows(sql: SqlPrepared): Future[seq[seq[string]]] {.async.} =
         withLock sqlite.lock:
             return sqlite.conn.getAllRows(sql)
 
-proc getRow(sql: SqlPrepared): Future[seq[string]] {.async.} =
+proc getRow(sql: SqlPrepared): Future[Option[seq[string]]] {.async.} =
     ## Executes an SQLite query and returns the first row
 
     if sqlite.useThread:
-        let future = newFuture[seq[string]]("sqlite.getRow")
+        let future = newFuture[Option[seq[string]]]("sqlite.getRow")
         withLock queryQueue.lock:
             queryQueue.queries.add(Query(
                 sql: sql,
@@ -143,13 +167,17 @@ proc getRow(sql: SqlPrepared): Future[seq[string]] {.async.} =
         return await future
     else:
         withLock sqlite.lock:
-            return sqlite.conn.getAllRows(sql)[0]
+            let res = sqlite.conn.getAllRows(sql)
+            if res.len > 0:
+                return some(res[0])
+            else:
+                return none[seq[string]]()
 
-proc getValue(sql: SqlPrepared): Future[string] {.async.} =
+proc getValue(sql: SqlPrepared): Future[Option[string]] {.async.} =
     ## Executes an SQLite query and returns the first value in the first row
 
     if sqlite.useThread:
-        let future = newFuture[string]("sqlite.getRow")
+        let future = newFuture[Option[string]]("sqlite.getValue")
         withLock queryQueue.lock:
             queryQueue.queries.add(Query(
                 sql: sql,
@@ -159,7 +187,11 @@ proc getValue(sql: SqlPrepared): Future[string] {.async.} =
         return await future
     else:
         withLock sqlite.lock:
-            return sqlite.conn.getValue(sql)
+            let res = sqlite.conn.getAllRows(sql)
+            if res.len > 0 and res[0].len > 0:
+                return some(res[0][0])
+            else:
+                return none[string]()
 
 proc parseAccountRow(row: seq[string]): AccountRow =
     # Parse row
@@ -183,10 +215,10 @@ proc parseAccountRow(row: seq[string]): AccountRow =
         creationDate: rowDate
     )
 
-proc parseAccountRowOrNone(row: seq[string]): Option[AccountRow] =
+proc parseAccountRowOrNone(row: Option[seq[string]]): Option[AccountRow] =
     # Check if row is empty
-    if row[0].len > 0:
-        return some(parseAccountRow(row))
+    if row.isSome:
+        return some(parseAccountRow(row.get))
     else:
         return none[AccountRow]()
 
@@ -216,10 +248,10 @@ proc parseStreamRow(row: seq[string]): StreamRow =
         creationDate: rowDate
     )
 
-proc parseStreamRowOrNone(row: seq[string]): Option[StreamRow] =
+proc parseStreamRowOrNone(row: Option[seq[string]]): Option[StreamRow] =
     # Check if row is empty
-    if row[0].len > 0:
-        return some(parseStreamRow(row))
+    if row.isSome:
+        return some(parseStreamRow(row.get))
     else:
         return none[StreamRow]()
 
@@ -245,7 +277,7 @@ proc insertAccount*(username: string, passwordHash: string, metadata: Option[Met
     stmt.bindParam(4, (int) isEphemeral)
     
     # Insert values and return row
-    return parseAccountRow(await getRow(stmt))
+    return parseAccountRow((await getRow(stmt)).get)
 
 proc fetchAccountById*(id: AccountId): Future[Option[AccountRow]] {.async.} =
     ## Fetches an account by its ID, returning none if none with the specified ID exist.
@@ -305,7 +337,7 @@ proc deleteAccountById*(id: AccountId) {.async.} =
     ## Deletes the account with the specified ID if it exists.
     
     # Prepare statement
-    let stmt = sqlite.conn.prepare("DELETE accounts WHERE id = ? LIMIT 1")
+    let stmt = sqlite.conn.prepare("DELETE FROM accounts WHERE id = ? LIMIT 1")
     stmt.bindParams((int64) id)
 
     # Execute
@@ -315,9 +347,18 @@ proc deleteAccountByUsername*(username: string) {.async.} =
     ## Deletes the account with the specified username if it exists.
     
     # Prepare statement
-    let stmt = sqlite.conn.prepare("DELETE accounts account_username = ? LIMIT 1")
+    let stmt = sqlite.conn.prepare("DELETE FROM accounts WHERE account_username = ? LIMIT 1")
     stmt.bindParams(username)
 
+    # Execute
+    await exec(stmt)
+
+proc deleteEphemeralAccounts*() {.async.} =
+    ## Deletes all accounts that are marked as ephemeral
+    
+    # Prepare statement
+    let stmt = sqlite.conn.prepare("DELETE FROM accounts WHERE account_ephemeral IS TRUE")
+    
     # Execute
     await exec(stmt)
 
@@ -345,7 +386,7 @@ proc insertStream*(ownerId: AccountId, name: string, isPublished: bool, key: str
         stmt.bindNull(6)
     
     # Insert values and return row
-    return parseStreamRow(await getRow(stmt))
+    return parseStreamRow((await getRow(stmt)).get)
 
 proc fetchStreamById*(id: StreamId): Future[Option[StreamRow]] {.async.} =
     ## Fetches a stream by its ID, returning none if none with the specified ID exist.
@@ -441,7 +482,7 @@ proc deleteStreamById*(id: AccountId) {.async.} =
     ## Deletes the stream with the specified ID if it exists.
     
     # Prepare statement
-    let stmt = sqlite.conn.prepare("DELETE streams WHERE id = ? LIMIT 1")
+    let stmt = sqlite.conn.prepare("DELETE FROM streams WHERE id = ? LIMIT 1")
     stmt.bindParams((int64) id)
 
     # Execute
@@ -451,7 +492,7 @@ proc deleteStreamsByOwner*(ownerId: AccountId) {.async.} =
     ## Deletes all streams with the specified owner.
     
     # Prepare statement
-    let stmt = sqlite.conn.prepare("DELETE streams WHERE stream_owner = ?")
+    let stmt = sqlite.conn.prepare("DELETE FROM streams WHERE stream_owner = ?")
     stmt.bindParams((int64) ownerId)
 
     # Execute

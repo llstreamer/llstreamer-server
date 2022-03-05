@@ -58,7 +58,10 @@ proc bytesToInt*[T: SomeInteger](bytes: openArray[uint8]): T =
     var num: T = low(T)
 
     for i in 0..<sizeof(T):
-        num = num shl 8 + bytes[i].toUnsigned
+        when cpuEndian == bigEndian:
+            num = num shl 8 + bytes[i].toUnsigned
+        else:
+            num = num shl 8 + bytes[bytes.len-1-i].toUnsigned
     
     return num
 
@@ -67,18 +70,24 @@ proc intToBytes*[T: SomeInteger](integer: T): array[sizeof(T), uint8] =
 
     var arr: array[sizeof(T), uint8]
     for i in 0..<sizeof(T):
-        arr[i] = (uint8) (integer shr (i*8))
+        when cpuEndian == bigEndian:
+            arr[arr.len-1-i] = (uint8) (integer shr (i*8))
+        else:
+            arr[i] = (uint8) (integer shr (i*8))
 
     return arr
 
 proc intToBytesSeq*[T: SomeInteger](integer: T): seq[uint8] =
-    ## Converts the provided integer into bytes stored in a sequence
+    ## Converts the provided integer into bytes
 
-    var res = newSeq[uint8](sizeof(T))
+    var arr = newSeq[uint8](sizeof(T))
     for i in 0..<sizeof(T):
-        res[i] = (uint8) (integer shr (i*8))
+        when cpuEndian == bigEndian:
+            arr[arr.len-1-i] = (uint8) (integer shr (i*8))
+        else:
+            arr[i] = (uint8) (integer shr (i*8))
 
-    return res
+    return arr
 
 proc slice*[T](s: openArray[T], startIndex: int, endIndex: int): seq[T] =
     ## Takes a slice out of a sequence. Works the same way as JavaScript's array slice menthod
@@ -115,12 +124,18 @@ proc writeAtOffset*[T](s: openArray[T], data: openArray[T], offset: int) =
 proc asBytes*(str: string): seq[uint8] {.inline.} =
     ## Converts a string to a byte array
 
-    return cast[seq[uint8]](str)
+    var bytes = newSeq[uint8](str.len)
+    for i in 0..<str.len:
+        bytes[i] = (uint8) str[i]
+    return bytes
 
 proc asStr*(bytes: openArray[uint8]): string {.inline.} =
     ## Converts a byte array to a string
     
-    return cast[string](bytes)
+    var str = newString(bytes.len)
+    for i in 0..<bytes.len:
+        str[i] = (char) bytes[i]
+    return str
 
 proc orEmpty*(str: Option[string]): string =
     ## Returns the value of the optional string, or empty if none
@@ -129,3 +144,11 @@ proc orEmpty*(str: Option[string]): string =
         return str.get
     else:
         return ""
+
+proc orNone*(str: string): Option[string] =
+    ## Returns none if the string is empty, otherwise returns the string
+    
+    if str.len < 1:
+        return none[string]()
+    else:
+        return some(str)

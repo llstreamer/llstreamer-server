@@ -1,6 +1,6 @@
 type
-    ServerClientCapabilities* {.pure.} = enum
-        ## Types of capabilities a server can have
+    ServerClientCapability* {.pure.} = enum
+        ## Types of capabilities a server and client can negociate
         PublishStream = "PUBLISH_STREAM" ## Streams can be published
         StreamChat = "STREAM_CHAT" ## Stream chat
         StreamCustodian = "STREAM_CUSTODIAN" ## Custodial codes for managing streams
@@ -8,15 +8,17 @@ type
     ServerPacketType* {.pure.} = enum
         ## Types of packets the server can send
         
-        ProtocolInfo = (uint8) 0 ## Protocol info, such as protocol version and supported protocol versions
-        Acknowledged = (uint8) 1 ## The client's packet was acknowledged
-        Disconnect = (uint8) 2 ## Client was disconnected for some reason
-        TooManyRequests = (uint8) 3 ## Returned when a client is sending too many requests
-        Denied = (uint8) 4 ## Sent as a reply to a request or action that was denied
-        Capabilities = (uint8) 5 ## Server capabilities, such as whether clients can broadcast streams
-        PlaintextMessage = (uint8) 6 ## Plaintext message
+        Upgrade = (uint8) 0
+        ProtocolInfo = (uint8) 1 ## Protocol info, such as protocol version and supported protocol versions
+        CapabilitiesInfo = (uint8) 2 ## Lists servers capabilities
+        Acknowledged = (uint8) 3 ## The client's packet was acknowledged
+        Disconnect = (uint8) 4 ## Client was disconnected for some reason
+        TooManyRequests = (uint8) 5 ## Returned when a client is sending too many requests
+        Denied = (uint8) 6 ## Sent as a reply to a request or action that was denied
+        PlaintextMessage = (uint8) 7 ## Plaintext message
+        SelfInfo = (uint8) 8 ## The client's connection and account info
         StreamCreated = (uint8) 9 ## Sent as a reply to a create stream request when the stream was successfully created
-        PublishedStreams = (uint8) 11 ## Sent as a reply to a fetch published streams request
+        PublishedStreams = (uint8) 10 ## Sent as a reply to a fetch published streams request
         # TODO: SubscribeChatAccepted - A chat subscription request was accepted
         # TODO: SubscribeChatRejected - A chat subscription request was rejected
         # TODO: ChatMessageAccepted - A chat message request was accepted
@@ -30,11 +32,13 @@ type
         ## Type of packets clients can send
 
         Protocol = (uint8) 0 ## Selects which protocol version to use for a connection
-        AuthRequest = (uint8) 1 # Should include username and optionally password (server password), along with public and private metadata
-        CreateStream = (uint8) 2 # Should include whether to publish, whether chat is enabled, whether to require custodial permission to watch, whether to require custodial permission to subscribe chat, whether to require custodial permission to send chat
-        SendStreamData = (uint8) 3 ## Dedicates the connection as a video data upload pipe
-        ViewStreamRequest = (uint8) 4 ## Requests to view a stream by piping its video data to the connection
-        PublishedStreamsRequest = (uint8) 5 ## Requests a list of published streams
+        Capabilities = (uint8) 1 ## Confirms which capabilities to support
+        AuthRequest = (uint8) 2 ## Requests authentication
+        SelfInfoRequest = (uint8) 3 ## Requests info about the current connection and the account associated with it
+        CreateStream = (uint8) 4 ## Requests to create a new stream
+        SendStreamData = (uint8) 5 ## Dedicates the connection as a video data upload pipe
+        ViewStreamRequest = (uint8) 6 ## Requests to view a stream by piping its video data to the connection
+        PublishedStreamsRequest = (uint8) 7 ## Requests a list of published streams
 
     SDeniedReason* {.pure.} = enum
         Unspecified ## No reason specified

@@ -1,4 +1,9 @@
+import packets/enums
+
 type
+    ConfigError* = object of CatchableError
+        ## Raised if a configuration-related error occurs
+
     PacketError* = object of CatchableError
         ## Raised if a packet-related error occurs
 
@@ -9,14 +14,33 @@ type
 
     MalformedPacketError* = object of PacketError
         ## Raised if a packet is malformed
-    
+
     ShortPacketHeaderError* = object of PacketError
         ## Raised if a packet header is too short
         
-        length*: int ## The size of the header received
+        length*: uint8 ## The size of the header received
     
-    CannotSerializeError* = object of PacketError
-        ## Raised if a packet or part of it cannot be serialized
+    ShortPacketBodyError* = object of PacketError
+        ## Raised if a packet body is too short
+        
+        length*: uint16 ## The size of the body received
+    
+    PacketTimeoutError* = object of PacketError
+        ## Raised if a packet timeout was reached before receiving a reply or successfully sending
+        
+        timeoutMs*: int ## The timeout duration in milliseconds
+    
+    WrongClientPacketTypeError* = object of PacketError
+        ## Raised if the client was expecting a certain type of client packet but got another
+        
+        expected*: ClientPacketType ## The expected packet type
+        received*: ClientPacketType ## The received packet type
+    
+    WrongServerPacketTypeError* = object of PacketError
+        ## Raised if the client was expecting a certain type of server packet but got another
+        
+        expected*: ServerPacketType ## The expected packet type
+        received*: ServerPacketType ## The received packet type
     
     CryptoError* = object of CatchableError
         ## Raised if a crypto-related error occurs
@@ -31,6 +55,12 @@ type
         ## Raised if a database migration-related error occurs
 
 # Constructors
+
+proc newConfigError*(msg: string): ref ConfigError =
+    var e: ref ConfigError
+    new(e)
+    e.msg = msg
+    return e
 
 proc newPacketError*(msg: string): ref PacketError =
     var e: ref PacketError
@@ -51,17 +81,41 @@ proc newMalformedPacketError*(msg: string): ref MalformedPacketError =
     e.msg = msg
     return e
 
-proc newShortPacketHeaderError*(msg: string, length: int): ref ShortPacketHeaderError =
+proc newShortPacketHeaderError*(msg: string, length: uint8): ref ShortPacketHeaderError =
     var e: ref ShortPacketHeaderError
     new(e)
     e.msg = msg
     e.length = length
     return e
 
-proc newCannotSerializeError*(msg: string): ref CannotSerializeError =
-    var e: ref CannotSerializeError
+proc newShortPacketBodyError*(msg: string, length: uint16): ref ShortPacketBodyError =
+    var e: ref ShortPacketBodyError
     new(e)
     e.msg = msg
+    e.length = length
+    return e
+
+proc newPacketTimeoutError*(msg: string, timeoutMs: int): ref PacketTimeoutError =
+    var e: ref PacketTimeoutError
+    new(e)
+    e.msg = msg
+    e.timeoutMs = timeoutMs
+    return e
+
+proc newWrongClientPacketTypeError*(msg: string, expected: ClientPacketType, received: ClientPacketType): ref WrongClientPacketTypeError =
+    var e: ref WrongClientPacketTypeError
+    new(e)
+    e.msg = msg
+    e.expected = expected
+    e.received = received
+    return e
+
+proc newWrongServerPacketTypeError*(msg: string, expected: ServerPacketType, received: ServerPacketType): ref WrongServerPacketTypeError =
+    var e: ref WrongServerPacketTypeError
+    new(e)
+    e.msg = msg
+    e.expected = expected
+    e.received = received
     return e
 
 proc newCryptoError*(msg: string): ref CryptoError =

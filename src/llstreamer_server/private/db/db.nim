@@ -1,19 +1,19 @@
-import std/[asyncfutures, options]
-import ".."/[exceptions, idgen]
-import objects, sqlite
+import std/[asyncdispatch, options]
+import ".."/[exceptions, idgen, objects]
+import objects as db_objects
+import sqlite
 
 var conf: DatabaseConfig
 var isSqlite = false
 var isPostgres = false
 var isMySql = false
-proc initDb*(config: DatabaseConfig) {.raises: DatabaseError.} =
+proc initDb*(config: DatabaseConfig) {.async, raises: [DatabaseError, Exception].} =
     conf = config
     
     case conf.kind:
     of DatabaseConfigKind.Memory:
         isSqlite = true
         initSqlite(":memory:", conf.useQueryThread)
-
     of DatabaseConfigKind.Sqlite:
         isSqlite = true
         initSqlite(conf.sqliteDbPath, true)
@@ -26,7 +26,7 @@ proc initDb*(config: DatabaseConfig) {.raises: DatabaseError.} =
 
 # Abstracted database procs
 
-proc insertAccount*(username: string, passwordHash: string, metadata: Option[Metadata], isEphemeral: bool): Future[AccountRow] {.raises: DatabaseError.} =
+proc insertAccount*(username: string, passwordHash: string, metadata: Option[Metadata], isEphemeral: bool): Future[AccountRow] {.raises: [DatabaseError, Exception].} =
     ## Inserts a new account with the specified details and returns it.
     ## In most cases you should use "createAccount" in the "accounts" module, because it hashes the password and does other important things.
     ## This method simply creates an entry in the database.
@@ -38,7 +38,7 @@ proc insertAccount*(username: string, passwordHash: string, metadata: Option[Met
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchAccountById*(id: AccountId): Future[Option[AccountRow]] {.raises: DatabaseError.} =
+proc fetchAccountById*(id: AccountId): Future[Option[AccountRow]] {.raises: [DatabaseError, Exception].} =
     ## Fetches an account by its ID, returning none if none with the specified ID exist.
     
     if isSqlite:
@@ -48,7 +48,7 @@ proc fetchAccountById*(id: AccountId): Future[Option[AccountRow]] {.raises: Data
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchAccountByUsername*(username: string): Future[Option[AccountRow]] {.raises: DatabaseError.} =
+proc fetchAccountByUsername*(username: string): Future[Option[AccountRow]] {.raises: [DatabaseError, Exception].} =
     ## Fetches an account by its username, returning none if none with the specified username exists.
     
     if isSqlite:
@@ -58,7 +58,7 @@ proc fetchAccountByUsername*(username: string): Future[Option[AccountRow]] {.rai
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateAccountMetadataById*(id: AccountId, metadata: Option[Metadata]): Future[void] {.raises: DatabaseError.} =
+proc updateAccountMetadataById*(id: AccountId, metadata: Option[Metadata]): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Updates the metadata of the account with the specified ID if it exists.
     
     if isSqlite:
@@ -68,7 +68,7 @@ proc updateAccountMetadataById*(id: AccountId, metadata: Option[Metadata]): Futu
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateAccountMetadataByUsername*(username: string, metadata: Option[Metadata]): Future[void] {.raises: DatabaseError.} =
+proc updateAccountMetadataByUsername*(username: string, metadata: Option[Metadata]): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Updates the metadata of the account with the specified username if it exists.
     
     if isSqlite:
@@ -78,7 +78,7 @@ proc updateAccountMetadataByUsername*(username: string, metadata: Option[Metadat
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteAccountById*(id: AccountId): Future[void] {.raises: DatabaseError.} =
+proc deleteAccountById*(id: AccountId): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Deletes the account with the specified ID if it exists.
     
     if isSqlite:
@@ -88,7 +88,7 @@ proc deleteAccountById*(id: AccountId): Future[void] {.raises: DatabaseError.} =
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteAccountByUsername*(username: string): Future[void] {.raises: DatabaseError.} =
+proc deleteAccountByUsername*(username: string): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Deletes the account with the specified username if it exists.
     
     if isSqlite:
@@ -98,7 +98,17 @@ proc deleteAccountByUsername*(username: string): Future[void] {.raises: Database
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc insertStream*(ownerId: AccountId, name: string, isPublished: bool, key: string, custodianKey: string, metadata: Option[Metadata]): Future[StreamRow] {.raises: DatabaseError.} =
+proc deleteEphemeralAccounts*(): Future[void] {.raises: [DatabaseError, Exception].} =
+    ## Deletes all accounts that are marked as ephemeral
+    
+    if isSqlite:
+        return sqlite.deleteEphemeralAccounts()
+    elif isPostgres:
+        raise newDatabaseError("PostgreSQL support not yet implemented")
+    elif isMySql:
+        raise newDatabaseError("MySQL support not yet implemented")
+
+proc insertStream*(ownerId: AccountId, name: string, isPublished: bool, key: string, custodianKey: string, metadata: Option[Metadata]): Future[StreamRow] {.raises: [DatabaseError, Exception].} =
     ## Inserts a new stream with the specified details and returns it.
     ## In most cases you should use "createStream" in the "streams" module, because it handles key generation and does other important things.
     ## This method simply creates an entry in the database.
@@ -110,7 +120,7 @@ proc insertStream*(ownerId: AccountId, name: string, isPublished: bool, key: str
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchStreamById*(id: StreamId): Future[Option[StreamRow]] {.raises: DatabaseError.} =
+proc fetchStreamById*(id: StreamId): Future[Option[StreamRow]] {.raises: [DatabaseError, Exception].} =
     ## Fetches a stream by its ID, returning none if none with the specified ID exist.
     
     if isSqlite:
@@ -120,7 +130,7 @@ proc fetchStreamById*(id: StreamId): Future[Option[StreamRow]] {.raises: Databas
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchStreamsByOwner*(ownerId: AccountId): Future[seq[StreamRow]] {.raises: DatabaseError.} =
+proc fetchStreamsByOwner*(ownerId: AccountId): Future[seq[StreamRow]] {.raises: [DatabaseError, Exception].} =
     ## Fetches all streams by the specified owner
     
     if isSqlite:
@@ -130,7 +140,7 @@ proc fetchStreamsByOwner*(ownerId: AccountId): Future[seq[StreamRow]] {.raises: 
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchPublicStreamsAfter*(id: StreamId, limit: int): Future[seq[StreamRow]] {.raises: DatabaseError.} =
+proc fetchPublicStreamsAfter*(id: StreamId, limit: int): Future[seq[StreamRow]] {.raises: [DatabaseError, Exception].} =
     ## Fetches public streams with an ID higher the specified ID, returning a maximum of the specified amount.
     
     if isSqlite:
@@ -140,7 +150,7 @@ proc fetchPublicStreamsAfter*(id: StreamId, limit: int): Future[seq[StreamRow]] 
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc fetchPublicStreamsBefore*(id: StreamId, limit: int): Future[seq[StreamRow]] {.raises: DatabaseError.} =
+proc fetchPublicStreamsBefore*(id: StreamId, limit: int): Future[seq[StreamRow]] {.raises: [DatabaseError, Exception].} =
     ## Fetches public streams with an ID higher the specified ID, returning a maximum of the specified amount (ordered by ID descending and then reversed after fetch, to facilitate pagination).
     
     if isSqlite:
@@ -150,7 +160,7 @@ proc fetchPublicStreamsBefore*(id: StreamId, limit: int): Future[seq[StreamRow]]
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateStreamMetadataById*(id: StreamId, metadata: Option[Metadata]): Future[void] {.raises: DatabaseError.} =
+proc updateStreamMetadataById*(id: StreamId, metadata: Option[Metadata]): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Updates the metadata of the stream with the specified ID if it exists.
     
     if isSqlite:
@@ -160,7 +170,7 @@ proc updateStreamMetadataById*(id: StreamId, metadata: Option[Metadata]): Future
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc updateStreamNameById*(id: StreamId, name: string): Future[void] {.raises: DatabaseError.} =
+proc updateStreamNameById*(id: StreamId, name: string): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Updates the name of the stream with the specified ID if it exists.
     
     if isSqlite:
@@ -170,7 +180,7 @@ proc updateStreamNameById*(id: StreamId, name: string): Future[void] {.raises: D
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteStreamById*(id: AccountId): Future[void] {.raises: DatabaseError.} =
+proc deleteStreamById*(id: AccountId): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Deletes the stream with the specified ID if it exists.
     
     if isSqlite:
@@ -180,7 +190,7 @@ proc deleteStreamById*(id: AccountId): Future[void] {.raises: DatabaseError.} =
     elif isMySql:
         raise newDatabaseError("MySQL support not yet implemented")
 
-proc deleteStreamsByOwner*(ownerId: AccountId): Future[void] {.raises: DatabaseError.} =
+proc deleteStreamsByOwner*(ownerId: AccountId): Future[void] {.raises: [DatabaseError, Exception].} =
     ## Deletes all streams with the specified owner.
     
     if isSqlite:

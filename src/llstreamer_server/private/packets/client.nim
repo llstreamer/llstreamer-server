@@ -1,25 +1,43 @@
 import std/tables
-import ".."/[idgen]
+import ".."/[idgen, objects]
 
 ## Client packets
 type
     CProtocol* = object
-        ## A CProtocol packet should be sent in reply to a SProtocolInfo packet and chooses which protocol to use for the rest of the connection.
+        ## A CProtocol packet should be sent in reply to an SProtocolInfo packet and chooses which protocol to use for the rest of the connection.
         
         protocolVersion*: uint16 ## The chosen protocol version
+    
+    CCapabilities* = object
+        ## A CCapabilities packet should be sent in reply to an SCapabilitiesInfo packet and confirms which capabilities should be supported.
+        ## Capabilities in this packet should not include anything that wasn't listed in the SCapabilitiesInfo packet this is in reply to.
+        
+        capabilities*: seq[string] ## The capabilities supported by the server
     
     CAuthRequest* = object
         ## An authentication request, required to be sent before sending other requests or actions.
         ## Username and password either need to be unique, or match existing username and password combination.
         ## Additionally, authentication may be handled by a different system entirely, or registration may be disabled.
         
+        serverPass*: string ## THe password to use for connecting to the server
         username*: string ## The username to use
         password*: string ## The password to use
         ephemeral*: bool ## Whether this account should be marked as ephemeral (will fail if this value does not match an existing account's ephemeral value)
         queryInfoRequiresCommonStream*: bool ## Whether users must be watching or subscribed to the chat of a common stream to query the client's info
         privMsgRequiresCommonStream*: bool ## Whether users must be watching or subscribed to the chat of a common stream to send a private message to the client
-        publicMetadata*: Table[string, string] ## Public metadata available to other clients (assigns metadata for all connections for this account, not just this one, and may be written to a database)
-        privateMetadata*: Table[string, string] ## Private metadata only available to the server
+        metadata*: Metadata ## Private metadata to pass to the server for this connection only (not the same as account metadata)
+    
+    CSelfInfoRequest* = object
+        ## A request for information about the current connection and the account associated with it.
+    
+    CUpdateAccount* = object
+        ## Updates information about the account associated with the current connection.
+        ## "currentPassword" must not be blank if "password" is also not blank. If "password" is not blank but "currentPassword" is, the packet will be denied using the Unauthorized reason.
+        
+        password*: string ## The account's new password (can be blank to leave unchanged)
+        metadata*: Metadata ## The account's new public metadata
+        ephemeral*: bool ## Whether the account will now be ephemeral
+        currentPassword*: string ## The account's current password (must not be blamk if "password" is specified)
     
     CCreateStream* = object
         ## A stream create request.

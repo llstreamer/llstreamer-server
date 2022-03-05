@@ -2,6 +2,14 @@ import ".."/[idgen]
 import server, client, enums
 
 type
+    PacketHeader* = object
+        ## A packet header
+        
+        typeByte*: uint8 ## The byte representing its type
+        id*: PacketId ## The packet's unique ID
+        reply*: PacketId ## The packet ID of the packet the packet is a reply to (or 0 if none)
+        size*: uint16 ## The size of the packet body in bytes
+
     ServerPacket* = object of RootObj
         ## A server packet
         
@@ -9,8 +17,12 @@ type
         reply*: PacketId ## The ID of the packet this is a reply to
 
         case kind*: ServerPacketType
+        of ServerPacketType.Upgrade:
+            upgradeBody*: SUpgrade
         of ServerPacketType.ProtocolInfo:
             protocolInfoBody*: SProtocolInfo
+        of ServerPacketType.CapabilitiesInfo:
+            capabilitiesInfoBody*: SCapabilitiesInfo
         of ServerPacketType.Acknowledged:
             acknowledgedBody*: SAcknowledged
         of ServerPacketType.Disconnect:
@@ -19,10 +31,10 @@ type
             tooManyRequestsBody*: STooManyRequests
         of ServerPacketType.Denied:
             deniedBody*: SDenied
-        of ServerPacketType.Capabilities:
-            capabilitiesBody*: SCapabilities
         of ServerPacketType.PlaintextMessage:
             plaintextMessageBody*: SPlaintextMessage
+        of ServerPacketType.SelfInfo:
+            selfInfoBody*: SSelfInfo
         of ServerPacketType.StreamCreated:
             streamCreatedBody*: SStreamCreated
         of ServerPacketType.PublishedStreams:
@@ -37,8 +49,12 @@ type
         case kind*: ClientPacketType
         of ClientPacketType.Protocol:
             protocolBody*: CProtocol
+        of ClientPacketType.Capabilities:
+            capabilitiesBody*: CCapabilities
         of ClientPacketType.AuthRequest:
             authRequestBody*: CAuthRequest
+        of ClientPacketType.SelfInfoRequest:
+            selfInfoRequestBody*: CSelfInfoRequest
         of ClientPacketType.CreateStream:
             createStreamBody*: CCreateStream
         of ClientPacketType.ViewStreamRequest:
