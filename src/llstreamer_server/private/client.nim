@@ -104,7 +104,7 @@ proc sendCapabilitiesInfo*(client: ref Client, capabilities: seq[ServerClientCap
 
 # REPLIES #
 
-proc acknowledge*(pkt: ClientPacketHandle) {.async.} =
+proc replyAcknowledged*(pkt: ClientPacketHandle) {.async.} =
     ## Replies to a client packet with an Acknowledged packet
     
     let client = pkt.client
@@ -116,7 +116,7 @@ proc acknowledge*(pkt: ClientPacketHandle) {.async.} =
         reply: id
     ))
 
-proc denied*(packetHandle: ClientPacketHandle, reason: SDeniedReason, message: Option[string] = none[string](), timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
+proc replyDenied*(packetHandle: ClientPacketHandle, reason: SDeniedReason, message: Option[string] = none[string](), timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
     ## Replies to a client packet with Denied
     
     let id = genServerPacketId()
