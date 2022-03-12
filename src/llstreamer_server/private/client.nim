@@ -72,18 +72,6 @@ proc disconnect*(client: ref Client, reason: SDisconnectReason = SDisconnectReas
     # Close client socket
     client.socket.close()
 
-proc acknowledge*(pkt: ClientPacketHandle) {.async.} =
-    ## Replies to a client packet with an Acknowledged packet
-    
-    let client = pkt.client
-    let id = pkt.packet.id
-
-    await client.sendPacket(ServerPacket(
-        kind: ServerPacketType.Acknowledged,
-        id: genServerPacketId(),
-        reply: id
-    ))
-
 proc sendProtocolInfo*(client: ref Client): Future[PacketId] {.async.} =
     ## Sends a ProtocolInfo packet to the client and returns the packet ID
     
@@ -116,7 +104,19 @@ proc sendCapabilitiesInfo*(client: ref Client, capabilities: seq[ServerClientCap
 
 # REPLIES #
 
-proc replyDenied*(packetHandle: ClientPacketHandle, reason: SDeniedReason, message: Option[string] = none[string](), timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
+proc acknowledge*(pkt: ClientPacketHandle) {.async.} =
+    ## Replies to a client packet with an Acknowledged packet
+    
+    let client = pkt.client
+    let id = pkt.packet.id
+
+    await client.sendPacket(ServerPacket(
+        kind: ServerPacketType.Acknowledged,
+        id: genServerPacketId(),
+        reply: id
+    ))
+
+proc denied*(packetHandle: ClientPacketHandle, reason: SDeniedReason, message: Option[string] = none[string](), timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
     ## Replies to a client packet with Denied
     
     let id = genServerPacketId()
