@@ -1,6 +1,6 @@
 import std/[db_sqlite, locks, asyncdispatch, tables, os, strformat, options, times, strutils, sequtils, algorithm, sugar]
 import msgpack4nim
-import ".."/[logging, exceptions, utils, idgen, objects, threadutils]
+import ".."/[logging, exceptions, utils, idgen, simpletypes, threadutils]
 import objects as db_objects
 import migrations
 

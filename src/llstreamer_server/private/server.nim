@@ -1,11 +1,11 @@
-import std/[options, asyncnet, asyncdispatch, times, strformat, sequtils, sugar, tables]
-import packets/[readwrite, enums]
+{.experimental: "codeReordering".}
+
+import std/[options, asyncnet, asyncdispatch, times, strformat, sequtils, sugar, tables, locks]
+import packets/[enums]
 import packets/objects as packet_objects
 import packets/enums as packet_enums
-import packets/utils as packet_utils
 import packets/client as client_packets
-import packets/server as server_packets
-import logging, objects, client, utils, constants, exceptions, timer, accounts, idgen, crypto
+import logging, objects, simpletypes, client, constants, exceptions, timer, accounts, idgen, events
 
 proc serverFromConfig*(inst: ref Server, config: Config): ref Server =
     ## Configures a Server ref object with the provided config
@@ -62,6 +62,73 @@ proc getClientByHost*(inst: ref Server, host: string): Option[ref Client] =
             return some(client)
     
     return none[ref Client]()
+
+# EVENT HANDLERS #
+
+proc onClientAuth*(server: ref Server, oneTime: bool, handler: proc(event: ref ServerClientAuthEvent) {.async.}): HandlerId =
+    ## Registers a new client authentication handler
+    
+    # Generate ID
+    let id = genHandlerId()
+
+    # Create handler
+    var hdlr: ref ServerClientAuthHandler
+    new(hdlr)
+    hdlr.id = id
+    hdlr.oneTime = oneTime
+    hdlr.handler = handler
+
+    # Add it
+    withLock server.clientAuthHandlersLock:
+        server.clientAuthHandlers.add(hdlr)
+
+    return id
+
+proc removeClientAuthHandler*(server: ref Server, id: HandlerId) =
+    ## Removes the client authentication handler with the specified ID
+    
+    withLock server.clientAuthHandlersLock:
+        for i in 0..<server.clientAuthHandlers.len:
+            let hdlr = server.clientAuthHandlers[i]
+            if hdlr.id == id:
+                server.clientAuthHandlers.del(i)
+                break
+
+proc onClientAuth*(server: ref Server, handler: proc(event: ref ServerClientAuthEvent) {.async.}): HandlerId =
+    ## Registers a new client authentication handler
+    
+    return onClientAuth(server, false, handler)
+
+proc oncePacket*(server: ref Server, handler: proc(event: ref ServerClientAuthEvent) {.async.}): HandlerId =
+    ## Registers a new one-time client authentication handler
+    
+    return onClientAuth(server, true, handler)
+
+# EVENT-BOUND UTILS #
+
+proc dispatchClientAuthEvent*(server: ref Server, client: ref Client, awaitHandlers: bool = false, raiseErrors: bool = true) {.async.} =
+    ## Dispatches a new client authentication event, optionally awaiting all packet handlers instead of letting them run out of order.
+    ## If awaitHandlers is false, then raiseErrors is ignored, since errors cannot be raised by handlers called with asyncCheck.
+    
+    # Create event
+    var event: ref ServerClientAuthEvent
+    new(event)
+    event.client = client
+
+    # Iterate over handlers
+    for i in 0..<server.clientAuthHandlers.len:
+        let hdlr = server.clientAuthHandlers[i]
+
+        # If this is a one-time handler, remove it from handler list
+        if hdlr.oneTime:
+            server.removeClientAuthHandler(hdlr.id)
+
+        await execHandler(hdlr, event, awaitHandlers, raiseErrors, "Error occurred while running registered client authentication event handler")
+
+# TODO onClientAuth, onceClientAuth, removeClientAuthHandler, dispatchClientAuthEvent
+# TODO Do them in the order that client.nim does them
+
+# MAIN INTERNAL CLIENT HANDLER LOOP #
 
 proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
     ## Initializes the provided client and starts a read loop for it
@@ -161,7 +228,7 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
                 # Denying with reason "InvalidCredentials" is intentional here
                 # If another reason was used here, a malicious individual attempting to discover whether an account exists could use different "isEphemeral" values while authenticating with an account to check whether it exists or not
                 # It's best to be opaque about authentication errors to protect privacy of users
-                await authReqHandle.replyDenied(
+                discard await authReqHandle.replyDenied(
                     reason = SDeniedReason.InvalidCredentials,
                     timeoutMs = DISCONNECT_MSG_TIMEOUT_MS,
                     timeoutRaiseError = false
@@ -174,8 +241,7 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
                 # Success, assign account
                 client.account = acc
             else:
-                echo "Denied"
-                await authReqHandle.replyDenied(
+                discard await authReqHandle.replyDenied(
                     reason = SDeniedReason.InvalidCredentials,
                     timeoutMs = DISCONNECT_MSG_TIMEOUT_MS,
                     timeoutRaiseError = false
@@ -194,9 +260,7 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
         # Acknowledge auth packet
         await authReqHandle.acknowledge()
 
-        # TODO When modifying Client object, make sure to add capabilities, protocol version, etc (stuff that was negociated)
-        # TODO After all of that is done, wait for packets and send them to handler.
-        # TODO Use that system to facilitate things like waiting for replies, etc.
+        # TODO When modifying Client object, make sure to add protocol version, etc (stuff that was negociated)
 
         # Socket is authorized now
         client.isAuthorized = true
@@ -204,9 +268,14 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
 
         logInfo fmt"Client with IP {client.host} authenticated as {username}"
 
+        # Run client auth hook
+        await server.clientAuthHandler(client)
+
+        # Dispatch client auth events
+        await server.dispatchClientAuthEvent(client, false, false)
+
         # Loop and parse packets
-        let sock = client.socket
-        while client.isConnected:
+        while client.isConnected and not client.isPipe:
             # Break out of loop if client is pipe
             if client.isPipe:
                 break
@@ -216,8 +285,11 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
                     # Read packet
                     let packet = await client.readPacket()
 
-                    # TODO Handle packet
+                    # Dispatch packet event
+                    await client.dispatchPacketEvent(packet.packet)
                 except ShortPacketHeaderError as e:
+                    # TODO For any error here, dispatch client error event
+
                     if e.length > 0:
                         logWarn "Socket disconnected mid-way through packet transmission"
                     
@@ -231,7 +303,9 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
             except:
                 logError "Exception occurred during client read loop", getCurrentException(), getCurrentExceptionMsg()
         
-        # TODO If client is streaming or watching stream, handle it here
+        if client.isPipe:
+            # TODO If client is streaming or watching stream, handle it here
+            echo "TODO"
         
     except ShortPacketHeaderError:
         logWarn "Client disconnected before negociating a protocol version or authenticating"
@@ -246,7 +320,10 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
     finally:
         # Handle disconnect
         if not client.socket.isClosed:
-            await client.disconnect()
+            await client.disconnect(
+                ignoreCancelation = true,
+                clientDiscon = true
+            )
         
         client.isConnected = false
 
@@ -266,6 +343,27 @@ proc serverAcceptLoop(server: ref Server) {.async.} =
         # Start packet client handler loop
         asyncCheck server.initClientAndLoop(client)
 
+# CLIENT ACTIONS HANDLER #
+
+proc clientAuthHandler(server: ref Server, client: ref Client) {.async.} =
+    ## Called when a client authenticates with the server
+    
+    discard client.onPacket(ClientPacketType.SelfInfoRequest, proc(event: ref ClientPacketEvent) {.async.} =
+        # Fetch account info and reply with it
+        # TODO
+        discard await event.handle.replyDenied(SDeniedReason.Unsupported)
+    )
+
+    discard client.oncePacket(proc(event: ref ClientPacketEvent) {.async.} =
+        echo "Got packet of type: "&($event.handle.packet.kind)
+        echo "Now waiting for another packet..."
+
+        let pkt = await client.nextPacket(some(3000))
+
+        echo "Got it: "&($pkt.packet.kind)
+    )
+
+# SERVER CONTROL #
 
 proc startServer*(server: ref Server) {.async.} =
     ## Starts a server
@@ -293,3 +391,4 @@ proc stopServer*(server: ref Server) {.async.} =
     stopTimer(server.timer)
     clearAllTimers(server.timer)
     echo "TODO"
+    # TODO Disconnect all clients, clear their events (after making sure disconnects are dispatched of course)

@@ -1,5 +1,5 @@
 import std/[options]
-import ".."/[idgen, utils, objects]
+import ".."/[idgen, utils, simpletypes]
 
 type
     AccountRow* = object

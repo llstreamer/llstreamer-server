@@ -2,19 +2,22 @@ import ".."/[idgen]
 import server, client, enums
 
 type
-    PacketHeader* = object
+    PacketHeader* = ref object of RootObj
         ## A packet header
         
         typeByte*: uint8 ## The byte representing its type
         id*: PacketId ## The packet's unique ID
         reply*: PacketId ## The packet ID of the packet the packet is a reply to (or 0 if none)
         size*: uint16 ## The size of the packet body in bytes
-
-    ServerPacket* = object of RootObj
-        ## A server packet
+    
+    Packet* = ref object of RootObj
+        ## A generic packet
         
         id*: PacketId ## The ID
         reply*: PacketId ## The ID of the packet this is a reply to
+
+    ServerPacket* = ref object of Packet
+        ## A server packet
 
         case kind*: ServerPacketType
         of ServerPacketType.Upgrade:
@@ -40,11 +43,8 @@ type
         of ServerPacketType.PublishedStreams:
             publishedStreamsBody*: SPublishedStreams
 
-    ClientPacket* = object of RootObj
+    ClientPacket* = ref object of Packet
         ## A client packet
-        
-        id*: PacketId ## The ID
-        reply*: PacketId ## The ID of the packet this is a reply to
 
         case kind*: ClientPacketType
         of ClientPacketType.Protocol:

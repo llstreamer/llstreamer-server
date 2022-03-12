@@ -70,7 +70,7 @@ proc addJob*(executor: ref LocalThreadExecutor, job: LocalThreadJob) =
     withLock executor.lock:
         executor.queue.add(job)
 
-template doInThread*(executor: ref LocalThreadExecutor, body: any) =
+template doInThread*(executor: ref LocalThreadExecutor, body: auto) =
     ## Executes this statement's body in the provided local thread executor's thread
 
     executor.addJob(

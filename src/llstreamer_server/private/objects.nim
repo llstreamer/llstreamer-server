@@ -1,6 +1,6 @@
-import std/[options, asyncnet, nativesockets, tables, json]
-
-import idgen, utils, timer
+import std/[options, asyncnet, nativesockets, json, locks]
+import packets/[objects, enums]
+import idgen, utils, timer, events
 
 ## Objects
 
@@ -60,6 +60,14 @@ type
         
         databaseConfig*: DatabaseConfig ## The database configuration
     
+    ServerClientAuthEvent* = object of Event
+        ## An event used when a client authenticates with the server
+        
+        client*: ref Client ## The client that authenticated
+    
+    ServerClientAuthHandler* = object of EventHandler[ServerClientAuthEvent]
+        ## A server client authentication event handler
+
     Server* = object
         ## Server state
 
@@ -71,11 +79,53 @@ type
         socket*: AsyncSocket ## The underlying server socket
 
         clients*: seq[ref Client] ## All connected clients
+        clientsLock*: Lock ## The lock that governs the clients seq
         authorizedClients*: seq[ref Client] ## All authorized clients
         streamingClients*: seq[ref Client] ## All currently streaming clients
         managerClients*: seq[ref Client] ## All clients which are server managers
 
+        # Event handlers
+        clientAuthHandlers*: seq[ref ServerClientAuthHandler] ## Handlers that are used when a client authenticates with the server
+        clientAuthHandlersLock*: Lock ## The lock that governs the clientAuthHandlers seq
+
         timer*: ref Timer ## The Timer instance used by the server
+
+    ClientPacketHandle* = tuple[packet: ClientPacket, client: ref Client]
+        ## Handle for client packets (used to reply)
+
+    ClientPacketEvent* = object of Event
+        ## A client packet event
+        
+        client*: ref Client ## The client
+        packet*: ClientPacket ## The packet
+        handle*: ClientPacketHandle ## The client packet handle
+    
+    ClientPacketHandler* = object of FilterableEventHandler[ClientPacketEvent, Option[ClientPacketType]]
+        ## A client packet event handler.
+        ## Client packet handlers are filtered by a packet type enum, or none to handle all packet types.
+    
+    ClientDisconnectEvent* = object of CancelableEvent
+        ## A client disconnection event.
+        ## This event is soft-cancelable, meaning being marked as canceled may not cancel the event if the originator of the event chooses to override cancelations.
+        
+        client*: ref Client ## The client
+        clientDisconnected*: bool ## Whether the client disconnected by itself, not by the server disconnecting it
+        reason*: SDisconnectReason ## The reason why the client was disconnected
+        message*: Option[string] ## The plaintext reason why the client was disconnected, if any
+    
+    ClientDisconnectHandler* = object of EventHandler[ClientDisconnectEvent]
+        ## A client disconnection handler
+    
+    ClientBecomePipeEvent* = object of CancelableEvent
+        ## A client become pipe event.
+        ## This event is soft-cancelable, meaning being marked as canceled may not cancel the event if the originator of the event chooses to override cancelations.
+        
+        client*: ref Client ## The client
+        isUploadPipe*: bool ## Whether the client is uploading to the server
+        isDownloadPipe*: bool ## Whether the client is downloading from the server
+    
+    ClientBecomePipeHandler* = object of EventHandler[ClientBecomePipeEvent]
+        ## A client become pipe handler
 
     Client* = object
         ## Client, either connected or not
@@ -93,8 +143,33 @@ type
         custodianStreams*: seq[StreamId] ## IDs of all streams the client is a custodian over
         capabilities*: seq[string] ## The capabilities negociated with the server
 
-        server*: Server ## The Server instance that the client belongs to
+        server*: ref Server ## The Server instance that the client belongs to
         account*: Account ## The client's username
+
+        # Event handlers
+        packetHandlers*: seq[ref ClientPacketHandler] ## Handlers that are used when the client sends a packet
+        packetHandlersLock*: Lock ## The lock that governs the packetHandlers seq
+
+        disconnectHandlers*: seq[ref ClientDisconnectHandler] ## Handlers that are used when the client disconnects
+        disconnectHandlersLock*: Lock ## The lock that governs the disconnectHandlers seq
+
+        becomePipeHandlers*: seq[ref ClientBecomePipeHandler] ## Handlers that are used when the client becomes a pipe
+        becomePipeHandlersLock*: Lock ## The lock that governs the becomePipeHandlers seq
+
+        # [X] TODO Add listener properties
+        # [X Probably not necessary] There should be the main listener which is private,
+        # [X Fulfilled with packetHandlers] and then private listener arrays that are either wildcard or match a specific packet type
+        # through this, also create methods to await certain packets
+        # [X] Listeners should have an ID, and be marked as either for one-time use (will be deleted after received), or always
+        # Listeners can be removed via their ID
+        # [X] There should also be a listener lock of course
+        # IMPORTANT One-time handlers should have Futures associated with them
+        # If the client is disconnected, fail all Futures for one-time handlers
+        # Multiple one-time handlers should be able to be resolved for the same packet
+        # IMPORTANT add onDisconnect handlers here too
+        # IMPORTANT add onBecomePipe handlers here too
+        # IMPORTANT add onLoopError handlers here too, to handle errors raised in main read loop
+        # Fail all one-time handlers when client becomes a pipe
 
     Account* = object
         ## A user account
@@ -104,6 +179,3 @@ type
         passwordHash*: string ## The account's password hash string
         isEphemeral*: bool ## Whether the account is ephemeral and should be deleted on startup/shutdown
         creationDate*: EpochSecond ## The epoch second when the account was created
-
-    Metadata* = Table[string, string]
-        ## Metadata stored in database and sent in packets (for accounts, streams, etc)

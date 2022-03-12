@@ -54,7 +54,7 @@ type
     DatabaseMigrationError* = object of DatabaseError
         ## Raised if a database migration-related error occurs
 
-# Constructors
+# Constructors #
 
 proc newConfigError*(msg: string): ref ConfigError =
     var e: ref ConfigError

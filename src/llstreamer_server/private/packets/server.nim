@@ -1,6 +1,6 @@
 import std/[tables, nativesockets]
 import enums
-import ".."/[utils, idgen, objects]
+import ".."/[utils, idgen, simpletypes]
 
 ## Server packets
 type

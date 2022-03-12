@@ -42,6 +42,7 @@ type
 
     SDeniedReason* {.pure.} = enum
         Unspecified ## No reason specified
+        InternalError ## The server encountered an internal error while trying to respond
         Unauthorized ## The client is not authorized to perform the request or action
         Unsupported ## The server does not support the request or action
         NotEnabled ## The feature the client is trying to interact with is not enabled

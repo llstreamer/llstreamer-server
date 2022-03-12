@@ -1,7 +1,7 @@
 import std/[locks, tables, asyncdispatch, options]
 import db/[db]
 import db/objects as db_objects
-import objects, idgen, client, crypto
+import objects, idgen, crypto, simpletypes
 
 type
     AccountsInUse = tuple[

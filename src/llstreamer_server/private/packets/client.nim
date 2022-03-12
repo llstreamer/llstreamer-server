@@ -1,5 +1,5 @@
 import std/tables
-import ".."/[idgen, objects]
+import ".."/[idgen, simpletypes]
 
 ## Client packets
 type

@@ -1,5 +1,5 @@
 import std/[asyncdispatch, options]
-import ".."/[exceptions, idgen, objects]
+import ".."/[exceptions, idgen, objects, simpletypes]
 import objects as db_objects
 import sqlite
 
