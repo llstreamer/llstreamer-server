@@ -1,4 +1,4 @@
-import std/[os, osproc, asyncfutures, strformat, strutils, base64, locks, sugar]
+import std/[os, osproc, asyncfutures, strformat, strutils, base64, locks]
 import argon2, random/urandom
 import logging, exceptions, threadutils
 
@@ -91,67 +91,68 @@ proc parseArgon2HashStr*(str: string): Argon2Hash {.raises: [CannotParseHashErro
     )
 
 # Processing queue
-var jobQueue: JobQueue
+var jobQueue = new(ref JobQueue)
 jobQueue.jobs = newSeq[Job]()
 
 # Local thread executor
 var threadExecutor = newLocalThreadExecutor()
 
-var cryptoThread: Thread[(ptr JobQueue, ptr ref LocalThreadExecutor)]
-proc cryptoThreadProc(queues: (ptr JobQueue, ptr ref LocalThreadExecutor)) {.thread.} =
+var cryptoThread: Thread[(ref JobQueue, ref LocalThreadExecutor)]
+proc cryptoThreadProc(queues: (ref JobQueue, ref LocalThreadExecutor)) {.thread.} =
     let queue = queues[0]
-    let executor = queues[1][]
+    let executor = queues[1]
 
     proc fail[T](future: Future[T], jobKind: JobKind, ex: ref Exception, exMsg: string) =
         logError fmt"Failed to execute job crypto job of type {jobKind}", ex, exMsg
-        future.fail(ex)
+        doInThread executor:
+            future.fail(ex)
 
     while true:
         sleep(1)
 
         # Check if there are any new jobs in the queue
-        while queue[].jobs.len > 0:
-            var job: Job
-            withLock queue[].lock:
-                job = queue[].jobs[0]
-                queue[].jobs.del(0)
+        withLock queue.lock:
+            if queue.jobs.len > 0:
+                var job: Job
+                job = queue.jobs[0]
+                queue.jobs.del(0)
 
-            case job.kind:
-            of JobKind.Hash:
-                try:
-                    # Generate salt
-                    let salt = urandom(128)
+                case job.kind:
+                of JobKind.Hash:
+                    try:
+                        # Generate salt
+                        let salt = urandom(128)
 
-                    # Hash password
-                    let hash = argon2("id", job.passToHash, cast[string](salt), 1, uint16.high, cpuThreads, 24).enc
+                        # Hash password
+                        let hash = argon2("id", job.passToHash, cast[string](salt), 1, uint16.high, cpuThreads, 24).enc
 
-                    # Complete future
-                    doInThread executor:
-                        job.hashFuture.complete(hash)
-                except:
-                    doInThread executor:
-                        job.hashFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
-            of JobKind.Verify:
-                try:
-                    # Parse hash string
-                    let ogHash = job.hashToVerify.parseArgon2HashStr()
+                        # Complete future
+                        doInThread executor:
+                            job.hashFuture.complete(hash)
+                    except:
+                        doInThread executor:
+                            job.hashFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
+                of JobKind.Verify:
+                    try:
+                        # Parse hash string
+                        let ogHash = job.hashToVerify.parseArgon2HashStr()
 
-                    # Hash password
-                    let passHash = argon2(ogHash.algoType, job.passToVerify, ogHash.salt, ogHash.iterations, ogHash.memory, ogHash.processorCount, (uint32) ogHash.hash.len).enc.parseArgon2HashStr()
+                        # Hash password
+                        let passHash = argon2(ogHash.algoType, job.passToVerify, ogHash.salt, ogHash.iterations, ogHash.memory, ogHash.processorCount, (uint32) ogHash.hash.len).enc.parseArgon2HashStr()
 
-                    # Compare and complete future
-                    doInThread executor:
-                        job.verifyFuture.complete(ogHash.hash == passHash.hash)
-                except:
-                    doInThread executor:
-                        job.verifyFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
+                        # Compare and complete future
+                        doInThread executor:
+                            job.verifyFuture.complete(ogHash.hash == passHash.hash)
+                    except:
+                        doInThread executor:
+                            job.verifyFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
                 
 
 proc initCryptoWorker*() =
     ## Initializes the crypto worker thread and associated components
 
-    startLocalThreadExecutor(threadExecutor)
-    createThread(cryptoThread, cryptoThreadProc, (addr jobQueue, addr threadExecutor))
+    asyncCheck startLocalThreadExecutor(threadExecutor)
+    createThread(cryptoThread, cryptoThreadProc, (jobQueue, threadExecutor))
 
 proc hashPassword*(password: string): Future[string] =
     ## Hashes a password on a worker thread and completes the future with the hashed password once it has finished

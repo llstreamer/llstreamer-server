@@ -33,79 +33,80 @@ type
         conn: DbConn
         useThread: bool
 
-var sqlite: Sqlite
-var queryQueue: QueryQueue
+var sqlite = new (ref Sqlite)
+var queryQueue = new (ref QueryQueue)
 
 # Local thread executor
 var threadExecutor = newLocalThreadExecutor()
 
-var sqliteThread: Thread[(ptr Sqlite, ptr QueryQueue, ptr ref LocalThreadExecutor)]
-proc sqliteThreadProc(args: (ptr Sqlite, ptr QueryQueue, ptr ref LocalThreadExecutor)) {.thread.} =
+var sqliteThread: Thread[(ref Sqlite, ref QueryQueue, ref LocalThreadExecutor)]
+proc sqliteThreadProc(args: (ref Sqlite, ref QueryQueue, ref LocalThreadExecutor)) {.thread.} =
     let db = args[0]
     let queue = args[1]
-    let executor = args[2][]
+    let executor = args[2]
 
     proc fail[T](future: Future[T], queryKind: QueryKind, ex: ref Exception, exMsg: string) =
         logError fmt"Failed to run SQLite query of type {queryKind}", ex, exMsg
-        future.fail(ex)
+        doInThread executor:
+            future.fail(ex)
 
     while true:
-        sleep(1)
+        sleep(5)
 
         # Check if there are any new queries in the queue
-        while queue[].queries.len > 0:
-            # Get the first item of the queue and remove it
-            var query: Query
-            withLock queue[].lock:
-                query = queue[].queries[0]
-                queue[].queries.del(0)
+        withLock queue.lock:
+            if queue.queries.len > 0:
+                # Get the first item of the queue and remove it
+                var query: Query
+                query = queue.queries[0]
+                queue.queries.del(0)
 
-            # Handle the query according to its type
-            withLock db[].lock:
-                case query.kind:
-                of QueryKind.Exec:
-                    try:
-                        db[].conn.exec(query.sql)
-                        doInThread executor:
-                            query.execFuture.complete()
-                    except:
-                        doInThread executor:
-                            query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                of QueryKind.Rows:
-                    try:
-                        let res = db[].conn.getAllRows(query.sql)
-                        doInThread executor:
-                            query.rowsFuture.complete(res)
-                    except:
-                        doInThread executor:
-                            query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                of QueryKind.Row:
-                    try:
-                        let res = db[].conn.getAllRows(query.sql)
-                        if res.len > 0:
+                # Handle the query according to its type
+                withLock db.lock:
+                    case query.kind:
+                    of QueryKind.Exec:
+                        try:
+                            db.conn.exec(query.sql)
                             doInThread executor:
-                                query.rowFuture.complete(some(res[0]))
-                        else:
+                                query.execFuture.complete()
+                        except:
                             doInThread executor:
-                                query.rowFuture.complete(none[seq[string]]())
-                    except:
-                        doInThread executor:
-                            query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                of QueryKind.Value:
-                    try:
-                        let res = db[].conn.getAllRows(query.sql)
-                        if res.len > 0 and res[0].len > 0:
+                                query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                    of QueryKind.Rows:
+                        try:
+                            let res = db.conn.getAllRows(query.sql)
                             doInThread executor:
-                                query.valueFuture.complete(some(res[0][0]))
-                        else:
+                                query.rowsFuture.complete(res)
+                        except:
                             doInThread executor:
-                                query.valueFuture.complete(none[string]())
-                    except:
-                        doInThread executor:
-                            query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                
-                # Destroy statement
-                finalize(query.sql)
+                                query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                    of QueryKind.Row:
+                        try:
+                            let res = db.conn.getAllRows(query.sql)
+                            if res.len > 0:
+                                doInThread executor:
+                                    query.rowFuture.complete(some(res[0]))
+                            else:
+                                doInThread executor:
+                                    query.rowFuture.complete(none[seq[string]]())
+                        except:
+                            doInThread executor:
+                                query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                    of QueryKind.Value:
+                        try:
+                            let res = db.conn.getAllRows(query.sql)
+                            if res.len > 0 and res[0].len > 0:
+                                doInThread executor:
+                                    query.valueFuture.complete(some(res[0][0]))
+                            else:
+                                doInThread executor:
+                                    query.valueFuture.complete(none[string]())
+                        except:
+                            doInThread executor:
+                                query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                    
+                    # Destroy statement
+                    finalize(query.sql)
 
 proc initSqlite*(filePath: string, useThread: bool) =
     ## Initializes the SQLite database connection, worker thread, and related components
@@ -114,9 +115,9 @@ proc initSqlite*(filePath: string, useThread: bool) =
     sqlite.conn.applyMigrations()
     sqlite.useThread = useThread
     if useThread:
-        startLocalThreadExecutor(threadExecutor)
+        asyncCheck startLocalThreadExecutor(threadExecutor)
         queryQueue.queries = newSeq[Query]()
-        createThread(sqliteThread, sqliteThreadProc, (addr sqlite, addr queryQueue, addr threadExecutor))
+        createThread(sqliteThread, sqliteThreadProc, (sqlite, queryQueue, threadExecutor))
 
 proc timestampToEpochSecond(timestamp: string): EpochSecond =
     return (uint64) parseTime(timestamp, "yyyy-MM-dd HH:mm:ss", utc()).toUnix()
