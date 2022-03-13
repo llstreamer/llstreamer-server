@@ -128,10 +128,12 @@ proc cryptoThreadProc(queues: (ref JobQueue, ref LocalThreadExecutor)) {.thread.
 
                         # Complete future
                         doInThread executor:
-                            job.hashFuture.complete(hash)
+                            if not job.hashFuture.isNil:
+                                job.hashFuture.complete(hash)
                     except:
                         doInThread executor:
-                            job.hashFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
+                            if not job.hashFuture.isNil:
+                                job.hashFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
                 of JobKind.Verify:
                     try:
                         # Parse hash string
@@ -142,10 +144,12 @@ proc cryptoThreadProc(queues: (ref JobQueue, ref LocalThreadExecutor)) {.thread.
 
                         # Compare and complete future
                         doInThread executor:
-                            job.verifyFuture.complete(ogHash.hash == passHash.hash)
+                            if not job.verifyFuture.isNil:
+                                job.verifyFuture.complete(ogHash.hash == passHash.hash)
                     except:
                         doInThread executor:
-                            job.verifyFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
+                            if not job.verifyFuture.isNil:
+                                job.verifyFuture.fail(job.kind, getCurrentException(), getCurrentExceptionMsg())
                 
 
 proc initCryptoWorker*() =

@@ -51,7 +51,7 @@ proc sqliteThreadProc(args: (ref Sqlite, ref QueryQueue, ref LocalThreadExecutor
             future.fail(ex)
 
     while true:
-        sleep(5)
+        sleep(1)
 
         # Check if there are any new queries in the queue
         withLock queue.lock:
@@ -68,42 +68,52 @@ proc sqliteThreadProc(args: (ref Sqlite, ref QueryQueue, ref LocalThreadExecutor
                         try:
                             db.conn.exec(query.sql)
                             doInThread executor:
-                                query.execFuture.complete()
+                                if not query.execFuture.isNil:
+                                    query.execFuture.complete()
                         except:
                             doInThread executor:
-                                query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                                if not query.execFuture.isNil:
+                                    query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                     of QueryKind.Rows:
                         try:
                             let res = db.conn.getAllRows(query.sql)
                             doInThread executor:
-                                query.rowsFuture.complete(res)
+                                if not query.rowsFuture.isNil:
+                                    query.rowsFuture.complete(res)
                         except:
                             doInThread executor:
-                                query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                                if not query.rowsFuture.isNil:
+                                    query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                     of QueryKind.Row:
                         try:
                             let res = db.conn.getAllRows(query.sql)
                             if res.len > 0:
                                 doInThread executor:
-                                    query.rowFuture.complete(some(res[0]))
+                                    if not query.rowFuture.isNil:
+                                        query.rowFuture.complete(some(res[0]))
                             else:
                                 doInThread executor:
-                                    query.rowFuture.complete(none[seq[string]]())
+                                    if not query.rowFuture.isNil:
+                                        query.rowFuture.complete(none[seq[string]]())
                         except:
                             doInThread executor:
-                                query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                                if not query.rowFuture.isNil:
+                                    query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                     of QueryKind.Value:
                         try:
                             let res = db.conn.getAllRows(query.sql)
                             if res.len > 0 and res[0].len > 0:
                                 doInThread executor:
-                                    query.valueFuture.complete(some(res[0][0]))
+                                    if not query.valueFuture.isNil:
+                                        query.valueFuture.complete(some(res[0][0]))
                             else:
                                 doInThread executor:
-                                    query.valueFuture.complete(none[string]())
+                                    if not query.valueFuture.isNil:
+                                        query.valueFuture.complete(none[string]())
                         except:
                             doInThread executor:
-                                query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                                if not query.valueFuture.isNil:
+                                    query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
                     
                     # Destroy statement
                     finalize(query.sql)
