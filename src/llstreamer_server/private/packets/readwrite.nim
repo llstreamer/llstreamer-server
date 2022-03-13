@@ -344,6 +344,8 @@ proc readPacketWithTimeout*(sock: AsyncSocket, timeoutMs: int): Future[ClientPac
     
     let fut = sock.readPacket()
     if await fut.withTimeout(timeoutMs):
-        return await fut
+        if not fut.isNil:
+            return await fut
+        raise newPacketError("A packet read future was nil and therefore could not be read")
     else:
         raise newPacketTimeoutError("Timeout reached before receiving a packet", timeoutMs)
