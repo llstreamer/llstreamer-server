@@ -24,25 +24,24 @@ type
         of QueryKind.Value:
             valueFuture: Future[Option[string]]
     
-    QueryQueue = object
-        lock: Lock
-        queries: seq[Query]
-    
     Sqlite = object
         lock: Lock
         conn: DbConn
         useThread: bool
 
+# SQLite connection reference
 var sqlite = new (ref Sqlite)
-var queryQueue = new (ref QueryQueue)
+
+# Channel for passing queries to the worker thread
+var queryChan: ptr Channel[Query]
 
 # Local thread executor
 var threadExecutor = newLocalThreadExecutor()
 
-var sqliteThread: Thread[(ref Sqlite, ref QueryQueue, ref LocalThreadExecutor)]
-proc sqliteThreadProc(args: (ref Sqlite, ref QueryQueue, ref LocalThreadExecutor)) {.thread.} =
+var sqliteThread: Thread[(ref Sqlite, ptr Channel[Query], ref LocalThreadExecutor)]
+proc sqliteThreadProc(args: (ref Sqlite, ptr Channel[Query], ref LocalThreadExecutor)) {.thread.} =
     let db = args[0]
-    let queue = args[1]
+    let chan = args[1]
     let executor = args[2]
 
     proc fail[T](future: Future[T], queryKind: QueryKind, ex: ref Exception, exMsg: string) =
@@ -53,81 +52,77 @@ proc sqliteThreadProc(args: (ref Sqlite, ref QueryQueue, ref LocalThreadExecutor
     while true:
         sleep(1)
 
-        # Check if there are any new queries in the queue
-        withLock queue.lock:
-            if queue.queries.len > 0:
-                # Get the first item of the queue and remove it
-                var query: Query
-                query = queue.queries[0]
-                queue.queries.del(0)
+        # Check if there are any new queries in the channel
+        let queryRes = chan[].tryRecv()
+        if queryRes.dataAvailable:
+            let query = queryRes.msg
 
-                # Handle the query according to its type
-                withLock db.lock:
-                    case query.kind:
-                    of QueryKind.Exec:
-                        try:
-                            db.conn.exec(query.sql)
+            # Handle the query according to its type
+            withLock db.lock:
+                case query.kind:
+                of QueryKind.Exec:
+                    try:
+                        db.conn.exec(query.sql)
+                        doInThread executor:
+                            query.execFuture.complete()
+                    except:
+                        doInThread executor:
+                            query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                of QueryKind.Rows:
+                    try:
+                        let res = db.conn.getAllRows(query.sql)
+                        doInThread executor:
+                            query.rowsFuture.complete(res)
+                    except:
+                        doInThread executor:
+                            query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                of QueryKind.Row:
+                    try:
+                        let res = db.conn.getAllRows(query.sql)
+                        if res.len > 0:
                             doInThread executor:
-                                if not query.execFuture.isNil:
-                                    query.execFuture.complete()
-                        except:
+                                query.rowFuture.complete(some(res[0]))
+                        else:
                             doInThread executor:
-                                if not query.execFuture.isNil:
-                                    query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                    of QueryKind.Rows:
-                        try:
-                            let res = db.conn.getAllRows(query.sql)
+                                query.rowFuture.complete(none[seq[string]]())
+                    except:
+                        doInThread executor:
+                            query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                of QueryKind.Value:
+                    try:
+                        let res = db.conn.getAllRows(query.sql)
+                        if res.len > 0 and res[0].len > 0:
                             doInThread executor:
-                                if not query.rowsFuture.isNil:
-                                    query.rowsFuture.complete(res)
-                        except:
+                                query.valueFuture.complete(some(res[0][0]))
+                        else:
                             doInThread executor:
-                                if not query.rowsFuture.isNil:
-                                    query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                    of QueryKind.Row:
-                        try:
-                            let res = db.conn.getAllRows(query.sql)
-                            if res.len > 0:
-                                doInThread executor:
-                                    if not query.rowFuture.isNil:
-                                        query.rowFuture.complete(some(res[0]))
-                            else:
-                                doInThread executor:
-                                    if not query.rowFuture.isNil:
-                                        query.rowFuture.complete(none[seq[string]]())
-                        except:
-                            doInThread executor:
-                                if not query.rowFuture.isNil:
-                                    query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                    of QueryKind.Value:
-                        try:
-                            let res = db.conn.getAllRows(query.sql)
-                            if res.len > 0 and res[0].len > 0:
-                                doInThread executor:
-                                    if not query.valueFuture.isNil:
-                                        query.valueFuture.complete(some(res[0][0]))
-                            else:
-                                doInThread executor:
-                                    if not query.valueFuture.isNil:
-                                        query.valueFuture.complete(none[string]())
-                        except:
-                            doInThread executor:
-                                if not query.valueFuture.isNil:
-                                    query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
-                    
-                    # Destroy statement
-                    finalize(query.sql)
+                                query.valueFuture.complete(none[string]())
+                    except:
+                        doInThread executor:
+                            query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                
+                # Destroy statement
+                finalize(query.sql)
 
 proc initSqlite*(filePath: string, useThread: bool) =
     ## Initializes the SQLite database connection, worker thread, and related components
 
+    # Open database
     sqlite.conn = open(filePath, "", "", "")
     sqlite.conn.applyMigrations()
     sqlite.useThread = useThread
+
+    # Start thread if enabled
     if useThread:
+        # Allocate shared memory for storing the query channel
+        queryChan = cast[ptr Channel[Query]](
+            allocShared0(sizeof(Channel[Query]))
+        )
+        queryChan[].open()
+
+        # Start local thread executor and worker thread
         asyncCheck startLocalThreadExecutor(threadExecutor)
-        queryQueue.queries = newSeq[Query]()
-        createThread(sqliteThread, sqliteThreadProc, (sqlite, queryQueue, threadExecutor))
+        createThread(sqliteThread, sqliteThreadProc, (sqlite, queryChan, threadExecutor))
 
 proc timestampToEpochSecond(timestamp: string): EpochSecond =
     return (uint64) parseTime(timestamp, "yyyy-MM-dd HH:mm:ss", utc()).toUnix()
@@ -137,12 +132,11 @@ proc exec(sql: SqlPrepared): Future[void] {.async.} =
 
     if sqlite.useThread:
         let future = newFuture[void]("sqlite.exec")
-        withLock queryQueue.lock:
-            queryQueue.queries.add(Query(
-                sql: sql,
-                kind: QueryKind.Exec,
-                execFuture: future
-            ))
+        queryChan[].send(Query(
+            sql: sql,
+            kind: QueryKind.Exec,
+            execFuture: future
+        ))
         await future
     else:
         withLock sqlite.lock:
@@ -153,12 +147,11 @@ proc getAllRows(sql: SqlPrepared): Future[seq[seq[string]]] {.async.} =
 
     if sqlite.useThread:
         let future = newFuture[seq[seq[string]]]("sqlite.getAllRows")
-        withLock queryQueue.lock:
-            queryQueue.queries.add(Query(
-                sql: sql,
-                kind: QueryKind.Rows,
-                rowsFuture: future
-            ))
+        queryChan[].send(Query(
+            sql: sql,
+            kind: QueryKind.Rows,
+            rowsFuture: future
+        ))
         return await future
     else:
         withLock sqlite.lock:
@@ -169,12 +162,11 @@ proc getRow(sql: SqlPrepared): Future[Option[seq[string]]] {.async.} =
 
     if sqlite.useThread:
         let future = newFuture[Option[seq[string]]]("sqlite.getRow")
-        withLock queryQueue.lock:
-            queryQueue.queries.add(Query(
-                sql: sql,
-                kind: QueryKind.Row,
-                rowFuture: future
-            ))
+        queryChan[].send(Query(
+            sql: sql,
+            kind: QueryKind.Row,
+            rowFuture: future
+        ))
         return await future
     else:
         withLock sqlite.lock:
@@ -189,12 +181,11 @@ proc getValue(sql: SqlPrepared): Future[Option[string]] {.async.} =
 
     if sqlite.useThread:
         let future = newFuture[Option[string]]("sqlite.getValue")
-        withLock queryQueue.lock:
-            queryQueue.queries.add(Query(
-                sql: sql,
-                kind: QueryKind.Value,
-                valueFuture: future
-            ))
+        queryChan[].send(Query(
+            sql: sql,
+            kind: QueryKind.Value,
+            valueFuture: future
+        ))
         return await future
     else:
         withLock sqlite.lock:

@@ -150,7 +150,7 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
                 if hostClientCount >= maxClientsPerHost:
                     await client.disconnect(SDisconnectReason.TooManyClients)
                     return
-    
+
     logInfo "Connection from "&($client.host)
 
     # Handle new connection
@@ -256,9 +256,9 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
             else:
                 metadataOps = none[Metadata]()
             client.account = await createAccount(username, password, metadataOps, isEphemeral)
-        
+
         # Acknowledge auth packet
-        await authReqHandle.acknowledge()
+        await authReqHandle.replyAcknowledged()
 
         # TODO When modifying Client object, make sure to add protocol version, etc (stuff that was negociated)
 
@@ -352,15 +352,6 @@ proc clientAuthHandler(server: ref Server, client: ref Client) {.async.} =
         # Fetch account info and reply with it
         # TODO
         discard await event.handle.replyDenied(SDeniedReason.Unsupported)
-    )
-
-    discard client.oncePacket(proc(event: ref ClientPacketEvent) {.async.} =
-        echo "Got packet of type: "&($event.handle.packet.kind)
-        echo "Now waiting for another packet..."
-
-        let pkt = await client.nextPacket(some(3000))
-
-        echo "Got it: "&($pkt.packet.kind)
     )
 
 # SERVER CONTROL #

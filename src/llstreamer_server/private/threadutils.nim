@@ -1,4 +1,4 @@
-import std/[asyncdispatch, locks]
+import std/[asyncdispatch]
 import logging
 
 # Default local thread executor error handler
