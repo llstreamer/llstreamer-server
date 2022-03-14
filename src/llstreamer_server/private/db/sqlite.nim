@@ -12,48 +12,75 @@ type
         Value
 
     Query = object
+        id: uint32
         sql: SqlPrepared
 
+        kind: QueryKind
+    
+    QueryRes = object
+        id: uint32
+        error: Option[ref Exception]
+        case kind: QueryKind:
+        of QueryKind.Exec:
+            ## No result
+        of QueryKind.Rows:
+            rowsRes: seq[seq[string]]
+        of QueryKind.Row:
+            rowRes: Option[seq[string]]
+        of QueryKind.Value:
+            valueRes: Option[string]
+    
+    QueryFut = object
         case kind: QueryKind
         of QueryKind.Exec:
-            execFuture: Future[void]
+            execFut: Future[void]
         of QueryKind.Rows:
-            rowsFuture: Future[seq[seq[string]]]
+            rowsFut: Future[seq[Row]]
         of QueryKind.Row:
-            rowFuture: Future[Option[seq[string]]]
+            rowFut: Future[Option[Row]]
         of QueryKind.Value:
-            valueFuture: Future[Option[string]]
+            valueFut: Future[Option[string]]
     
     Sqlite = object
         lock: Lock
         conn: DbConn
         useThread: bool
 
+# Query ID generation
+var id = (uint32) 0;
+proc genId(): uint32 =
+    inc id
+    return id
+
 # SQLite connection reference
 var sqlite = new (ref Sqlite)
 
-# Channel for passing queries to the worker thread
+# Channels for passing queries/results to/from the worker thread
 var queryChan: ptr Channel[Query]
+var resChan: ptr Channel[QueryRes]
 
-# Local thread executor
-var threadExecutor = newLocalThreadExecutor()
+# Table of query IDs and their corresponding Futures
+var futsTable = new Table[uint32, QueryFut]
 
-var sqliteThread: Thread[(ref Sqlite, ptr Channel[Query], ref LocalThreadExecutor)]
-proc sqliteThreadProc(args: (ref Sqlite, ptr Channel[Query], ref LocalThreadExecutor)) {.thread.} =
+var sqliteThread: Thread[(ref Sqlite, ptr Channel[Query], ptr Channel[QueryRes])]
+proc sqliteThreadProc(args: (ref Sqlite, ptr Channel[Query], ptr Channel[QueryRes])) {.thread.} =
     let db = args[0]
-    let chan = args[1]
-    let executor = args[2]
+    let queries = args[1]
+    let res = args[2]
 
-    proc fail[T](future: Future[T], queryKind: QueryKind, ex: ref Exception, exMsg: string) =
-        logError fmt"Failed to run SQLite query of type {queryKind}", ex, exMsg
-        doInThread executor:
-            future.fail(ex)
+    proc fail(query: Query, ex: ref Exception, exMsg: string) =
+        logError fmt"Failed to run SQLite query of type {query.kind}", ex, exMsg
+        res[].send(QueryRes(
+            id: query.id,
+            error: some(ex),
+            kind: query.kind
+        ))
 
     while true:
         sleep(1)
 
         # Check if there are any new queries in the channel
-        let queryRes = chan[].tryRecv()
+        let queryRes = queries[].tryRecv()
         if queryRes.dataAvailable:
             let query = queryRes.msg
 
@@ -63,46 +90,105 @@ proc sqliteThreadProc(args: (ref Sqlite, ptr Channel[Query], ref LocalThreadExec
                 of QueryKind.Exec:
                     try:
                         db.conn.exec(query.sql)
-                        doInThread executor:
-                            query.execFuture.complete()
+                        
+                        # Send result
+                        res[].send(QueryRes(
+                            id: query.id,
+                            error: none[ref Exception](),
+                            kind: QueryKind.Exec
+                        ))
                     except:
-                        doInThread executor:
-                            query.execFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        query.fail(getCurrentException(), getCurrentExceptionMsg())
                 of QueryKind.Rows:
                     try:
-                        let res = db.conn.getAllRows(query.sql)
-                        doInThread executor:
-                            query.rowsFuture.complete(res)
+                        let dbRes = db.conn.getAllRows(query.sql)
+                        
+                        # Send result
+                        res[].send(QueryRes(
+                            id: query.id,
+                            error: none[ref Exception](),
+                            kind: QueryKind.Rows,
+                            rowsRes: dbRes
+                        ))
                     except:
-                        doInThread executor:
-                            query.rowsFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        query.fail(getCurrentException(), getCurrentExceptionMsg())
                 of QueryKind.Row:
                     try:
-                        let res = db.conn.getAllRows(query.sql)
-                        if res.len > 0:
-                            doInThread executor:
-                                query.rowFuture.complete(some(res[0]))
+                        let dbRes = db.conn.getAllRows(query.sql)
+                        var val: Option[Row]
+                        if dbRes.len > 0:
+                            val = some(dbRes[0])
                         else:
-                            doInThread executor:
-                                query.rowFuture.complete(none[seq[string]]())
+                            val = none[Row]()
+                        
+                        # Send result
+                        res[].send(QueryRes(
+                            id: query.id,
+                            error: none[ref Exception](),
+                            kind: QueryKind.Row,
+                            rowRes: val
+                        ))
                     except:
-                        doInThread executor:
-                            query.rowFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        query.fail(getCurrentException(), getCurrentExceptionMsg())
                 of QueryKind.Value:
                     try:
-                        let res = db.conn.getAllRows(query.sql)
-                        if res.len > 0 and res[0].len > 0:
-                            doInThread executor:
-                                query.valueFuture.complete(some(res[0][0]))
+                        let dbRes = db.conn.getAllRows(query.sql)
+                        var val: Option[string]
+                        if dbRes.len > 0 and dbRes[0].len > 0:
+                            val = some(dbRes[0][0])
                         else:
-                            doInThread executor:
-                                query.valueFuture.complete(none[string]())
+                            val  = none[string]()
+                        
+                        # Send result
+                        res[].send(QueryRes(
+                            id: query.id,
+                            error: none[ref Exception](),
+                            kind: QueryKind.Value,
+                            valueRes: val
+                        ))
                     except:
-                        doInThread executor:
-                            query.valueFuture.fail(query.kind, getCurrentException(), getCurrentExceptionMsg())
+                        query.fail(getCurrentException(), getCurrentExceptionMsg())
                 
                 # Destroy statement
                 finalize(query.sql)
+
+proc resRecvLoop() {.async.} =
+    ## Loop that checks for results and completes their corresponding futures
+
+    while true:
+        await sleepAsync(1)
+
+        # Check for result
+        let resRes = resChan[].tryRecv()
+        if resRes.dataAvailable:
+            let res = resRes.msg
+
+            # Check for key in futures table
+            if futsTable.hasKey(res.id):
+                let val = futsTable[res.id]
+                futsTable.del(res.id)
+
+                # Fail future if error present, otherwise complete it
+                if res.error.isSome:
+                    case res.kind:
+                    of QueryKind.Exec:
+                        val.execFut.fail(res.error.get)
+                    of QueryKind.Rows:
+                        val.rowsFut.fail(res.error.get)
+                    of QueryKind.Row:
+                        val.rowFut.fail(res.error.get)
+                    of QueryKind.Value:
+                        val.valueFut.fail(res.error.get)
+                else:
+                    case res.kind:
+                    of QueryKind.Exec:
+                        val.execFut.complete()
+                    of QueryKind.Rows:
+                        val.rowsFut.complete(res.rowsRes)
+                    of QueryKind.Row:
+                        val.rowFut.complete(res.rowRes)
+                    of QueryKind.Value:
+                        val.valueFut.complete(res.valueRes)
 
 proc initSqlite*(filePath: string, useThread: bool) =
     ## Initializes the SQLite database connection, worker thread, and related components
@@ -114,86 +200,131 @@ proc initSqlite*(filePath: string, useThread: bool) =
 
     # Start thread if enabled
     if useThread:
-        # Allocate shared memory for storing the query channel
+        # Allocate shared memory for channels
         queryChan = cast[ptr Channel[Query]](
             allocShared0(sizeof(Channel[Query]))
         )
+        resChan = cast[ptr Channel[QueryRes]](
+            allocShared0(sizeof(Channel[QueryRes]))
+        )
         queryChan[].open()
+        resChan[].open()
 
-        # Start local thread executor and worker thread
-        asyncCheck startLocalThreadExecutor(threadExecutor)
-        createThread(sqliteThread, sqliteThreadProc, (sqlite, queryChan, threadExecutor))
+        # Start result receiver and worker thread
+        asyncCheck resRecvLoop()
+        createThread(sqliteThread, sqliteThreadProc, (sqlite, queryChan, resChan))
 
 proc timestampToEpochSecond(timestamp: string): EpochSecond =
     return (uint64) parseTime(timestamp, "yyyy-MM-dd HH:mm:ss", utc()).toUnix()
 
-proc exec(sql: SqlPrepared): Future[void] {.async.} =
+proc exec(sql: SqlPrepared): Future[void] =
     ## Executes an SQLite statement
+    
+    let future = newFuture[void]("sqlite.exec")
 
     if sqlite.useThread:
-        let future = newFuture[void]("sqlite.exec")
-        queryChan[].send(Query(
-            sql: sql,
+        # Generate ID and insert future into futures table
+        let id = genId()
+        futsTable[id] = QueryFut(
             kind: QueryKind.Exec,
-            execFuture: future
+            execFut: future
+        )
+
+        # Send query
+        queryChan[].send(Query(
+            id: id,
+            sql: sql,
+            kind: QueryKind.Exec
         ))
-        await future
     else:
         withLock sqlite.lock:
             sqlite.conn.exec(sql)
+            future.complete()
+    
+    return future
 
-proc getAllRows(sql: SqlPrepared): Future[seq[seq[string]]] {.async.} =
+proc getAllRows(sql: SqlPrepared): Future[seq[Row]] =
     ## Executes an SQLite query and returns all rows in a raw format
+    
+    let future = newFuture[seq[Row]]("sqlite.getAllRows")
 
     if sqlite.useThread:
-        let future = newFuture[seq[seq[string]]]("sqlite.getAllRows")
-        queryChan[].send(Query(
-            sql: sql,
+        # Generate ID and insert future into futures table
+        let id = genId()
+        futsTable[id] = QueryFut(
             kind: QueryKind.Rows,
-            rowsFuture: future
+            rowsFut: future
+        )
+
+        # Send query
+        queryChan[].send(Query(
+            id: id,
+            sql: sql,
+            kind: QueryKind.Rows
         ))
-        return await future
     else:
         withLock sqlite.lock:
-            return sqlite.conn.getAllRows(sql)
+            future.complete(sqlite.conn.getAllRows(sql))
+    
+    return future
 
-proc getRow(sql: SqlPrepared): Future[Option[seq[string]]] {.async.} =
+proc getRow(sql: SqlPrepared): Future[Option[Row]] =
     ## Executes an SQLite query and returns the first row
 
+    let future = newFuture[Option[Row]]("sqlite.getRow")
+
     if sqlite.useThread:
-        let future = newFuture[Option[seq[string]]]("sqlite.getRow")
-        queryChan[].send(Query(
-            sql: sql,
+        # Generate ID and insert future into futures table
+        let id = genId()
+        futsTable[id] = QueryFut(
             kind: QueryKind.Row,
-            rowFuture: future
+            rowFut: future
+        )
+
+        # Send query
+        queryChan[].send(Query(
+            id: id,
+            sql: sql,
+            kind: QueryKind.Row
         ))
-        return await future
     else:
         withLock sqlite.lock:
             let res = sqlite.conn.getAllRows(sql)
             if res.len > 0:
-                return some(res[0])
+                future.complete(some(res[0]))
             else:
-                return none[seq[string]]()
+                future.complete(none[Row]())
+    
+    return future
 
-proc getValue(sql: SqlPrepared): Future[Option[string]] {.async.} =
+proc getValue(sql: SqlPrepared): Future[Option[string]] =
     ## Executes an SQLite query and returns the first value in the first row
 
+    let future = newFuture[Option[string]]("sqlite.getValue")
+
     if sqlite.useThread:
-        let future = newFuture[Option[string]]("sqlite.getValue")
-        queryChan[].send(Query(
-            sql: sql,
+        # Generate ID and insert future into futures table
+        let id = genId()
+        futsTable[id] = QueryFut(
             kind: QueryKind.Value,
-            valueFuture: future
+            valueFut: future
+        )
+
+        # Send query
+        queryChan[].send(Query(
+            id: id,
+            sql: sql,
+            kind: QueryKind.Value
         ))
-        return await future
     else:
         withLock sqlite.lock:
             let res = sqlite.conn.getAllRows(sql)
             if res.len > 0 and res[0].len > 0:
-                return some(res[0][0])
+                future.complete(some(res[0][0]))
             else:
-                return none[string]()
+                future.complete(none[string]())
+    
+    return future
 
 proc parseAccountRow(row: seq[string]): AccountRow =
     # Parse row
