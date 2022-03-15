@@ -5,7 +5,7 @@ import packets/[enums]
 import packets/objects as packet_objects
 import packets/enums as packet_enums
 import packets/client as client_packets
-import logging, objects, simpletypes, client, constants, exceptions, timer, accounts, idgen, events
+import logging, objects, simpletypes, client, constants, exceptions, timer, accounts, idgen, events, crypto
 
 proc serverFromConfig*(inst: ref Server, config: Config): ref Server =
     ## Configures a Server ref object with the provided config
@@ -178,7 +178,7 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
             return
 
         # Send capabilities info
-        # TODO If some of these features are disabled, do not include them
+        # TODO If some of these features are disabled in the config, do not include them
         let supportedCaps = @[
             ServerClientCapability.PublishStream,
             ServerClientCapability.StreamChat,

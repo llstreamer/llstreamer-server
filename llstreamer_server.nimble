@@ -12,5 +12,5 @@ namedBin["llstreamer_server"] = "server"
 
 requires "nim >= 1.6.2"
 requires "msgpack4nim == 0.3.1"
-requires "argon2 == 1.0.1"
+requires "argon2_highlevel >= 1.0.0"
 requires "random == 0.5.7"
