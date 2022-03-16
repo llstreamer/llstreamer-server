@@ -44,7 +44,8 @@ proc sendPacketWithTimeout*(client: ref Client, pkt: ServerPacket, timeoutMs: in
     await client.socket.sendPacketWithTimeout(pkt, timeoutMs, raiseError)
 
 proc disconnect*(client: ref Client, reason: SDisconnectReason = SDisconnectReason.Unspecified, message: Option[string] = none[string](), ignoreCancelation: bool = false, clientDiscon: bool = false) {.async.} =
-    ## Disconnects a client, optionally with the specified reason, and message
+    ## Disconnects a client, optionally with the specified reason, and message.
+    ## This proc is safe to call even if the client connection is already closed, because it checks the client socket state before trying to send anything.
     
     # Dispatch event, optionally ignoring cancelation
     await client.dispatchDisconnectEvent(clientDiscon, reason, message, true, false, not ignoreCancelation)
@@ -58,19 +59,20 @@ proc disconnect*(client: ref Client, reason: SDisconnectReason = SDisconnectReas
                 client.server.clients.del(i)
                 break
 
-    # Try to send disconnect packet, but don't wait forever
-    discard await withTimeout(client.sendPacket(ServerPacket(
-        kind: ServerPacketType.Disconnect,
-        id: genServerPacketId(),
-        reply: blankPacketId,
-        disconnectBody: SDisconnect(
-            reason: reason,
-            message: message.orEmpty()
-        )
-    )), DISCONNECT_MSG_TIMEOUT_MS)
+    if not client.socket.isClosed:
+        # Try to send disconnect packet, but don't wait forever
+        discard await withTimeout(client.sendPacket(ServerPacket(
+            kind: ServerPacketType.Disconnect,
+            id: genServerPacketId(),
+            reply: blankPacketId,
+            disconnectBody: SDisconnect(
+                reason: reason,
+                message: message.orEmpty()
+            )
+        )), DISCONNECT_MSG_TIMEOUT_MS)
 
-    # Close client socket
-    client.socket.close()
+        # Close client socket
+        client.socket.close()
 
 proc sendProtocolInfo*(client: ref Client): Future[PacketId] {.async.} =
     ## Sends a ProtocolInfo packet to the client and returns the packet ID

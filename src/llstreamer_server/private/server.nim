@@ -43,6 +43,16 @@ proc getClientByUsername*(inst: ref Server, username: string): Option[ref Client
     
     return none[ref Client]()
 
+proc getClientCountByUsername*(inst: ref Server, username: string): uint32 =
+    ## Returns the number of clients connected to the server using the specified username
+    
+    var num: uint32 = 0
+    for client in inst.clients:
+        if client.account.username == username:
+            inc num
+    
+    return num
+
 proc getClientsByHost*(inst: ref Server, host: string): seq[ref Client] =
     ## Returns all clients connected to a server with the specified IP address
     
@@ -62,6 +72,16 @@ proc getClientByHost*(inst: ref Server, host: string): Option[ref Client] =
             return some(client)
     
     return none[ref Client]()
+
+proc getClientCountByHost*(inst: ref Server, host: string): uint32 =
+    ## Returns the number of clients connected to the server with the specified IP address
+    
+    var num: uint32 = 0
+    for client in inst.clients:
+        if client.host == host:
+            inc num
+    
+    return num
 
 # EVENT HANDLERS #
 
@@ -173,9 +193,13 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
 
         # Check protocol version
         # Right now, only one protocol version is supported
-        if protoPkt.protocolBody.protocolVersion != PROTOCOL_VER:
+        let protoVer = protoPkt.protocolBody.protocolVersion
+        if protoVer != PROTOCOL_VER:
             await client.disconnect()
             return
+
+        # Attach protocol version
+        client.protocolVersion = protoVer
 
         # Send capabilities info
         # TODO If some of these features are disabled in the config, do not include them
@@ -250,17 +274,13 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
                 return
         else:
             # Create account and assign it
-            var metadataOps: Option[Metadata]
-            if metadata.len > 0:
-                metadataOps = some(metadata)
-            else:
-                metadataOps = none[Metadata]()
-            client.account = await createAccount(username, password, metadataOps, isEphemeral)
+            client.account = await createAccount(username, password, none[Metadata](), isEphemeral)
+
+        # Attach metadata to the client
+        client.metadata = metadata
 
         # Acknowledge auth packet
         await authReqHandle.replyAcknowledged()
-
-        # TODO When modifying Client object, make sure to add protocol version, etc (stuff that was negociated)
 
         # Socket is authorized now
         client.isAuthorized = true
@@ -305,7 +325,7 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
         
         if client.isPipe:
             # TODO If client is streaming or watching stream, handle it here
-            echo "TODO"
+            echo "TODO Handle client pipe"
         
     except ShortPacketHeaderError:
         logWarn "Client disconnected before negociating a protocol version or authenticating"
@@ -319,15 +339,10 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
         logError "Error occurred in client read loop", e, e.msg
     finally:
         # Handle disconnect
-        if not client.socket.isClosed:
-            await client.disconnect(
-                ignoreCancelation = true,
-                clientDiscon = true
-            )
-        
-        client.isConnected = false
-
-        # TODO Remove from clients if finished authenticating
+        await client.disconnect(
+            ignoreCancelation = true,
+            clientDiscon = true
+        )
 
         logInfo "Disconnection from "&client.host
 
@@ -350,6 +365,14 @@ proc clientAuthHandler(server: ref Server, client: ref Client) {.async.} =
     
     discard client.onPacket(ClientPacketType.SelfInfoRequest, proc(event: ref ClientPacketEvent) {.async.} =
         # Fetch account info and reply with it
+
+        let acc = client.account
+        
+        # Connected client count
+        let clientCount = server.getClientCountByUsername(acc.username)
+
+
+
         # TODO
         discard await event.handle.replyDenied(SDeniedReason.Unsupported)
     )

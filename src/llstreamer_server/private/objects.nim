@@ -1,6 +1,6 @@
 import std/[options, asyncnet, nativesockets, json, locks]
 import packets/[objects, enums]
-import idgen, utils, timer, events
+import idgen, utils, timer, events, simpletypes
 
 ## Objects
 
@@ -141,7 +141,9 @@ type
         isStreaming*: bool ## Whether the client is streaming (which means the connection is dedicated)
         isViewingStream*: bool ## Whether the client is viewing a stream (which means the connection is dedicated)
         custodianStreams*: seq[StreamId] ## IDs of all streams the client is a custodian over
+        protocolVersion*: uint16 ## The protocol version the client is using
         capabilities*: seq[string] ## The capabilities negociated with the server
+        metadata*: Metadata ## The metadata attached to this specific client that was passed on authentication
 
         server*: ref Server ## The Server instance that the client belongs to
         account*: Account ## The client's username
