@@ -179,5 +179,6 @@ type
         id*: AccountId ## The account ID
         username*: string ## The username
         passwordHash*: string ## The account's password hash string
+        metadata*: Option[Metadata] ## The account's client-defined metadata
         isEphemeral*: bool ## Whether the account is ephemeral and should be deleted on startup/shutdown
         creationDate*: EpochSecond ## The epoch second when the account was created

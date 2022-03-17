@@ -5,6 +5,7 @@ import packets/[enums]
 import packets/objects as packet_objects
 import packets/enums as packet_enums
 import packets/client as client_packets
+import packets/server as server_packets
 import logging, objects, simpletypes, client, constants, exceptions, timer, accounts, idgen, events, crypto
 
 proc serverFromConfig*(inst: ref Server, config: Config): ref Server =
@@ -280,7 +281,7 @@ proc initClientAndLoop(server: ref Server, client: ref Client) {.async.} =
         client.metadata = metadata
 
         # Acknowledge auth packet
-        await authReqHandle.replyAcknowledged()
+        discard await authReqHandle.replyAcknowledged()
 
         # Socket is authorized now
         client.isAuthorized = true
@@ -365,16 +366,22 @@ proc clientAuthHandler(server: ref Server, client: ref Client) {.async.} =
     
     discard client.onPacket(ClientPacketType.SelfInfoRequest, proc(event: ref ClientPacketEvent) {.async.} =
         # Fetch account info and reply with it
-
         let acc = client.account
+        var accMeta: Metadata
+        if acc.metadata.isSome:
+            accMeta = acc.metadata.get # TODO Make sure this field is actually fetched
         
-        # Connected client count
-        let clientCount = server.getClientCountByUsername(acc.username)
-
-
-
-        # TODO
-        discard await event.handle.replyDenied(SDeniedReason.Unsupported)
+        discard await event.handle.reply(ServerPacket(
+            kind: ServerPacketType.SelfInfo,
+            selfInfoBody: SSelfInfo(
+                clients: server.getClientCountByUsername(acc.username),
+                clientMetadata: client.metadata,
+                accountUsername: acc.username,
+                accountMetadata: accMeta,
+                accountEphemeral: acc.isEphemeral,
+                accountCreationDate: acc.creationDate
+            )
+        ))
     )
 
 # SERVER CONTROL #

@@ -106,27 +106,31 @@ proc sendCapabilitiesInfo*(client: ref Client, capabilities: seq[ServerClientCap
 
 # REPLIES #
 
-proc replyAcknowledged*(pkt: ClientPacketHandle) {.async.} =
+proc replyAcknowledged*(handle: ClientPacketHandle, timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
     ## Replies to a client packet with an Acknowledged packet
     
-    let client = pkt.client
-    let id = pkt.packet.id
+    let id = genServerPacketId()
 
-    await client.sendPacket(ServerPacket(
+    let pkt = ServerPacket(
         kind: ServerPacketType.Acknowledged,
-        id: genServerPacketId(),
-        reply: id
-    ))
+        id: id,
+        reply: handle.packet.id
+    )
 
-proc replyDenied*(packetHandle: ClientPacketHandle, reason: SDeniedReason, message: Option[string] = none[string](), timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
-    ## Replies to a client packet with Denied
+    if timeoutMs > 0:
+        await handle.client.sendPacketWithTimeout(pkt, timeoutMs, timeoutRaiseError)
+    else:
+        await handle.client.sendPacket(pkt)
+
+proc replyDenied*(handle: ClientPacketHandle, reason: SDeniedReason, message: Option[string] = none[string](), timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
+    ## Replies to a client packet with a Denied packet
     
     let id = genServerPacketId()
 
     let pkt = ServerPacket(
         kind: ServerPacketType.Denied,
         id: id,
-        reply: packetHandle.packet.id,
+        reply: handle.packet.id,
         deniedBody: SDenied(
             reason: reason,
             message: message.orEmpty()
@@ -134,11 +138,26 @@ proc replyDenied*(packetHandle: ClientPacketHandle, reason: SDeniedReason, messa
     )
 
     if timeoutMs > 0:
-        await packetHandle.client.sendPacketWithTimeout(pkt, timeoutMs, timeoutRaiseError)
+        await handle.client.sendPacketWithTimeout(pkt, timeoutMs, timeoutRaiseError)
     else:
-        await packetHandle.client.sendPacket(pkt)
+        await handle.client.sendPacket(pkt)
     
     return id
+
+proc reply*[T](handle: ClientPacketHandle, packet: sink T, timeoutMs: int = 0, timeoutRaiseError: bool = true): Future[PacketId] {.async.} =
+    ## Replies to a client packet.
+    ## The provided ServerPacket will have its reply ID assigned to the ID in the ClientPacketHandle, and will be assigned a generated ID.
+    
+    let id = genServerPacketId()
+
+    # Assign properties
+    packet.id = id
+    packet.reply = handle.packet.id
+
+    if timeoutMs > 0:
+        await handle.client.sendPacketWithTimeout(packet, timeoutMs)
+    else:
+        await handle.client.sendPacket(packet)
 
 # EVENT HANDLERS #
 

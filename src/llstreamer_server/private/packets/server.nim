@@ -78,7 +78,7 @@ type
     SSelfInfo* = object
         ## Sent as a reply to a CSelfInfo packet, and contains information about the requesting client's connection and account.
         
-        clients*: uint16 ## The total amount of client connections associated with the client's account that are currently active
+        clients*: uint32 ## The total amount of client connections associated with the client's account that are currently active
         clientMetadata*: Metadata ## The private metadata attached to this client connection
         accountUsername*: string ## The client account's username
         accountMetadata*: Metadata ## The client account's public metadata

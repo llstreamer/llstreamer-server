@@ -14,6 +14,7 @@ proc accRowToAcc(row: AccountRow): Account =
         id: row.id,
         username: row.username,
         passwordHash: row.passwordHash,
+        metadata: row.metadata,
         isEphemeral: row.isEphemeral,
         creationDate: row.creationDate
     )
