@@ -201,12 +201,8 @@ proc initSqlite*(filePath: string, useThread: bool) =
     # Start thread if enabled
     if useThread:
         # Allocate shared memory for channels
-        queryChan = cast[ptr Channel[Query]](
-            allocShared0(sizeof(Channel[Query]))
-        )
-        resChan = cast[ptr Channel[QueryRes]](
-            allocShared0(sizeof(Channel[QueryRes]))
-        )
+        queryChan = createShared(Channel[Query])
+        resChan = createShared(Channel[QueryRes])
         queryChan[].open()
         resChan[].open()
 
